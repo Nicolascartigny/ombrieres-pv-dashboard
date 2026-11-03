@@ -200,23 +200,25 @@ df_rem["Tarif (€/MWh)"] = df_rem["site"].map(lambda s: TARIFS.get(s, 95.0))
 df_rem["Rémunération (€)"] = df_rem["MWh"] * df_rem["Tarif (€/MWh)"]
 
 fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmode="group",
-                 category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
+                 text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
                  labels={"site": "Site", "Rémunération (€)": "Revenus (€)"})
+fig_rem.update_traces(texttemplate='%{text}', textposition='outside')
 fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
 st.plotly_chart(fig_rem, width="stretch")
 
-# ---------------------------------------------------------------- Graphiques 2 et 3 (Performance & Production YTD / Mensuelle)
+# ---------------------------------------------------------------- Graphiques 2 et 3
 g2, g3 = st.columns(2)
 
 with g2:
     st.subheader("Performance spécifique par site")
     perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
     moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
-    fig2 = px.bar(perf, x="site", y="kwh_kwc_j", color="site", text_auto=".2f",
+    fig2 = px.bar(perf, x="site", y="kwh_kwc_j", color="site", text="site",
                   color_discrete_map=COULEURS,
                   labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""})
     fig2.add_hline(y=moyenne, line_dash="dash", line_color="gray",
                    annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
+    fig2.update_traces(texttemplate='%{text}', textposition='outside')
     fig2.update_layout(showlegend=False, margin=dict(t=30, b=10))
     st.plotly_chart(fig2, width="stretch")
     st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site : compare les sites indépendamment de leur taille et de leur date de mise en service.")
@@ -228,8 +230,9 @@ with g3:
     mensuel["kWh"] = mensuel["kwh_produits"]
     mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
     fig3 = px.bar(mensuel, x="Mois", y="kWh", color="site", barmode="group",
-                  category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
+                  text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
                   labels={"site": "Site", "kWh": "Production (kWh)"})
+    fig3.update_traces(texttemplate='%{text}', textposition='outside')
     fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
     st.plotly_chart(fig3, width="stretch")
 
@@ -238,9 +241,10 @@ st.subheader("📈 Production totale par site depuis le début de l'année")
 df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 df_ytd["MWh"] = df_ytd["kwh_produits"] / 1000
 
-fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text_auto=".1f",
+fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
                  color_discrete_map=COULEURS,
                  labels={"kwh_produits": "Production totale (kWh)", "site": ""})
+fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
 fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_ytd, width="stretch")
 
