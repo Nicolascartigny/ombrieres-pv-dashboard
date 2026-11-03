@@ -1,10 +1,11 @@
 name: Collecte quotidienne FusionSolar 
 
-on: 
+on:
+  push: # Déclenche l'action à chaque sauvegarde / modification du code
   schedule: 
     # Déclenchement automatique tous les matins à 05:00 UTC (06:00 heure française)
     - cron: '0 5 * * *'
-  workflow_dispatch: # Permet aussi de lancer la collecte manuellement en 1 clic quand vous le souhaitez 
+  workflow_dispatch: # Permet de lancer la collecte manuellement en 1 clic
 
 jobs:
   collecte:
