@@ -112,7 +112,7 @@ def get_alarmes_actives():
 # INTERFACE PRINCIPALE
 # =====================================================================
 st.title("⚡ Suivi & performance des ombrières photovoltaïques")
-st.caption(f"Mauges Énergies · 6 sites · {PUISSANCE_ANNONCEE_KWC} kWc · objectif {fmt(OBJECTIF_ANNUEL_KWH / 1000)} MWh/an")
+st.caption(f"Mauges Énergies · 6 sites · {PUISSANCE_ANNONCEE_KWC} kWc")
 
 df = load_data()
 if df.empty:
@@ -254,3 +254,28 @@ with g3:
     st.subheader("Production mensuelle par site (kWh)")
     mensuel = (dfy.assign(mois=dfy["date"].dt.month)
                   .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
+    mensuel["kWh"] = mensuel["kwh_produits"]
+    mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
+    
+    fig3 = px.bar(mensuel, x="Mois", y="kWh", color="site", barmode="group",
+                  text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
+                  labels={"site": "Site", "kWh": "Production (kWh)"})
+    fig3.update_traces(texttemplate='%{text}', textposition='outside')
+    fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
+    st.plotly_chart(fig3, width="stretch")
+
+# ---------------------------------------------------------------- Graphique 4 : Production totale depuis le début de l'année
+st.subheader("📈 Production totale par site depuis le début de l'année")
+df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+
+fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
+                 color_discrete_map=COULEURS,
+                 labels={"kwh_produits": "Production totale (kWh)", "site": ""})
+fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
+fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_ytd, width="stretch")
+
+with st.expander("Données journalières récentes"):
+    recent = dfy.sort_values(["date", "site"], ascending=[False, True])
+    st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
+                 width="stretch", hide_index=True)
