@@ -50,10 +50,12 @@ fs_url = st.secrets.get("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")
 def get_courbes_du_jour():
     """Interroge FusionSolar pour récupérer la puissance heure par heure de la journée en cours."""
     if not fs_user or not fs_pass:
+        st.warning("Identifiants FusionSolar manquants dans les secrets.")
         return pd.DataFrame()
         
     client = FusionSolarClient(fs_url, fs_user, fs_pass)
     if not client.login():
+        st.error("Échec de la connexion à l'API FusionSolar.")
         return pd.DataFrame()
         
     stations = client.get_stations()
@@ -66,11 +68,20 @@ def get_courbes_du_jour():
             mapping[code] = SITES_REF[key]["nom"]
             
     if not mapping:
+        st.warning("Aucune centrale correspondante trouvée pour le direct.")
         return pd.DataFrame()
         
     aujourdhui = date.today()
-    data_brute = client.get_hourly_kpi(list(mapping.keys()), aujourdhui)
+    try:
+        data_brute = client.get_hourly_kpi(list(mapping.keys()), aujourdhui)
+    except Exception as e:
+        st.error(fErreur lors de l'appel getKpiStationHour : {e}")
+        return pd.DataFrame()
     
+    if not data_brute:
+        # Debug optionnel pour voir si l'API répond mais renvoie une liste vide
+        return pd.DataFrame()
+
     lignes = []
     for item in data_brute:
         code = item.get("stationCode") or item.get("plantCode")
