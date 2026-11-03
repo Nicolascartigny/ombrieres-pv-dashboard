@@ -253,7 +253,7 @@ def main() -> int:
 
     base_url = os.getenv("FUSIONSOLAR_URL") or DEFAULT_URL
     user = os.getenv("FUSIONSOLAR_USER") or ""
-    password = os.getenv("FUSIONSOLAR_PASS") or ""
+    password = os.getenv("FUSIONSOLAR_PASSWORD") or ""
     creds_ok = bool(user and password) and not user.startswith("votre_") and not password.startswith("votre_")
 
     if args.mock or os.getenv("MOCK") == "1" or not creds_ok:
