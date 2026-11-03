@@ -1,159 +1,56 @@
-"""Tableau de bord Streamlit : suivi des 6 ombrières photovoltaïques Mauges Énergies."""
-import sqlite3
-from contextlib import closing
-
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+import pandas as pd
+from datetime import date
+from collect_data import FusionSolarClient, SITES_REF, match_site
 
-from config import (DB_PATH, OBJECTIF_ANNUEL_KWH, PUISSANCE_ANNONCEE_KWC,
-                    SITES_REF, TOTAL_KWC)
+# 1. Récupération des secrets Streamlit
+fs_user = st.secrets.get("FUSIONSOLAR_USER")
+fs_pass = st.secrets.get("FUSIONSOLAR_PASSWORD")
+fs_url = st.secrets.get("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")
 
-MOIS = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin",
-        "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."]
-COULEURS = dict(zip([s["nom"] for s in SITES_REF.values()], px.colors.qualitative.Set2))
-
-st.set_page_config(page_title="Suivi Ombrières PV", page_icon="⚡", layout="wide")
-
-
-def fmt(x, nd=0):
-    return f"{x:,.{nd}f}".replace(",", "\u00a0").replace(".", ",")
-
-
-@st.cache_data(ttl=600)
-def load_data():
-    if not DB_PATH.exists():
+@st.cache_data(ttl=600) # Cache de 10 minutes (600 secondes) pour préserver les quotas de l'API
+def get_courbes_du_jour():
+    if not fs_user or not fs_pass:
         return pd.DataFrame()
-    with closing(sqlite3.connect(DB_PATH)) as conn:
-        return pd.read_sql_query("SELECT * FROM production_journaliere", conn, parse_dates=["date"])
-
-
-def perf_par_site(d):
-    g = d.groupby("site", as_index=False).agg(kwh=("kwh_produits", "sum"), kwc=("kwc", "first"),
-                                              jours=("date", "nunique"))
-    g["kwh_kwc"] = g["kwh"] / g["kwc"]
-    g["kwh_kwc_j"] = g["kwh_kwc"] / g["jours"]   # moyenne par jour de production : comparable entre sites
-    return g
-
-
-st.title("⚡ Suivi & performance des ombrières photovoltaïques")
-st.caption(f"Mauges Énergies · 6 sites · {PUISSANCE_ANNONCEE_KWC} kWc · objectif {fmt(OBJECTIF_ANNUEL_KWH / 1000)} MWh/an")
-
-df = load_data()
-if df.empty:
-    st.warning("Aucune donnée. Lancez d'abord `python collect_data.py` (mode démonstration sans identifiants).")
-    st.stop()
-
-df = df[df["site_key"].isin(SITES_REF)].copy()
-df["site"] = df["site_key"].map(lambda k: SITES_REF[k]["nom"])
-df["kwc"] = df["site_key"].map(lambda k: SITES_REF[k]["kwc"])
-
-# Objectifs annuels individuels issus du dossier technique (en MWh/an)
-OBJECTIFS_PAR_SITE = {
-    "La Loge (BEM)": 133,
-    "Mauges Communauté (MC)": 121,
-    "Les Minières (MSE)": 207,
-    "Complexe Sportif (SEV)": 105,
-    "La Jumellière (CEA)": 290,
-    "Pôle Santé (ODA)": 198
-}
-with st.sidebar:
-    annees = sorted(df["date"].dt.year.unique(), reverse=True)
-    annee = st.selectbox("Année", annees)
-    if st.button("Rafraîchir les données"):
-        st.cache_data.clear()
-        st.rerun()
-
-dfy = df[df["date"].dt.year == annee]
-# Calcul dynamique de l'objectif cumulé uniquement pour les sites actifs en base
-sites_actifs = dfy["site"].unique()
-objectif_annuel_mwh = sum(OBJECTIFS_PAR_SITE.get(site, 0) for site in sites_actifs)
-OBJECTIF_ANNUEL_KWH = objectif_annuel_mwh * 1000
-
-if (dfy["source"] == "mock").any():
-    st.info("Données de démonstration (mode MOCK) : renseignez les identifiants FusionSolar pour les données réelles.")
-
-# ---------------------------------------------------------------- KPI
-dernier_jour = dfy["date"].max()
-jour_df = dfy[dfy["date"] == dernier_jour]
-prod_jour = jour_df["kwh_produits"].sum()
-kwc_jour = jour_df["kwc"].sum()
-mois_df = dfy[dfy["date"].dt.month == dernier_jour.month]
-prod_mois = mois_df["kwh_produits"].sum()
-kwc_mois = mois_df.drop_duplicates("site_key")["kwc"].sum()
-perf_mois = perf_par_site(mois_df)
-meilleur = perf_mois.loc[perf_mois["kwh_kwc_j"].idxmax()]
-total_annee = dfy["kwh_produits"].sum()
-taux = total_annee / OBJECTIF_ANNUEL_KWH
-n_sites = dfy["site_key"].nunique()
-kwc_actifs = dfy.drop_duplicates("site_key")["kwc"].sum()
-
-k1, k2, k3, k4 = st.columns(4)
-k1.metric(f"Production du jour ({dernier_jour:%d/%m})", f"{fmt(prod_jour)} kWh",
-          f"{fmt(prod_jour / kwc_jour, 2)} kWh/kWc", delta_color="off")
-k2.metric(f"Production de {MOIS[dernier_jour.month - 1].lower()}", f"{fmt(prod_mois / 1000, 1)} MWh",
-          f"{fmt(prod_mois / kwc_mois, 1)} kWh/kWc", delta_color="off")
-k3.metric("Meilleur site du mois", meilleur["site"],
-          f"{fmt(meilleur['kwh_kwc_j'], 2)} kWh/kWc/jour", delta_color="off")
-k4.metric("Taux de réalisation de l'objectif", f"{fmt(taux * 100, 1)} %",
-          f"{fmt(total_annee / 1000, 1)} / {fmt(OBJECTIF_ANNUEL_KWH / 1000)} MWh", delta_color="off")
-
-st.caption(f"{n_sites} site(s) sur {len(SITES_REF)} dans les données ({fmt(kwc_actifs)} kWc sur {fmt(TOTAL_KWC)} kWc). "
-           "Le taux de réalisation est calculé sur l'objectif annuel des 4 sites : il reste mécaniquement bas "
-           "vu que les sites ne produisent pas depuis le 1er janvier.")
-
-st.divider()
-
-# ---------------------------------------------------------------- Graphique 1
-st.subheader("Production cumulée vs objectif annuel")
-journalier = dfy.groupby("date")["kwh_produits"].sum().sort_index()
-jours = pd.date_range(journalier.index.min(), journalier.index.max())
-cumul = journalier.reindex(jours, fill_value=0).cumsum() / 1000
-debut, fin = pd.Timestamp(annee, 1, 1), pd.Timestamp(annee, 12, 31)
-obj_mwh = OBJECTIF_ANNUEL_KWH / 1000
-
-fig1 = go.Figure()
-fig1.add_trace(go.Scatter(x=cumul.index, y=cumul.values, mode="lines", fill="tozeroy",
-                          name="Production cumulée", line=dict(color="#2a9d8f")))
-fig1.add_trace(go.Scatter(x=[debut, fin], y=[0, obj_mwh], mode="lines",
-                          name="Trajectoire linéaire", line=dict(color="gray", dash="dot")))
-fig1.add_hline(y=obj_mwh, line_dash="dash", line_color="crimson",
-               annotation_text=f"Objectif annuel {fmt(obj_mwh)} MWh", annotation_position="top left")
-fig1.update_layout(yaxis_title="MWh cumulés", xaxis_range=[debut, fin],
-                   yaxis_range=[0, max(obj_mwh, cumul.max()) * 1.1],
-                   margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.15))
-st.plotly_chart(fig1, width="stretch")
-
-# ---------------------------------------------------------------- Graphiques 2 et 3
-g2, g3 = st.columns(2)
-
-with g2:
-    st.subheader("Performance spécifique par site")
-    perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
-    moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
-    fig2 = px.bar(perf, x="site", y="kwh_kwc_j", color="site", text_auto=".2f",
-                  color_discrete_map=COULEURS,
-                  labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""})
-    fig2.add_hline(y=moyenne, line_dash="dash", line_color="gray",
-                   annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
-    fig2.update_layout(showlegend=False, margin=dict(t=30, b=10))
-    st.plotly_chart(fig2, width="stretch")
-    st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site : compare les sites indépendamment de leur taille et de leur date de mise en service.")
-
-with g3:
-    st.subheader("Répartition mensuelle par site")
-    mensuel = (dfy.assign(mois=dfy["date"].dt.month)
-                  .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-    mensuel["MWh"] = mensuel["kwh_produits"] / 1000
-    mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
-    fig3 = px.bar(mensuel, x="Mois", y="MWh", color="site", barmode="stack",
-                  category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
-                  labels={"site": "Site"})
-    fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
-    st.plotly_chart(fig3, width="stretch")
-
-with st.expander("Données journalières récentes"):
-    recent = dfy.sort_values(["date", "site"], ascending=[False, True])
-    st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
-                 width="stretch", hide_index=True)
+        
+    client = FusionSolarClient(fs_url, fs_user, fs_pass)
+    if not client.login():
+        return pd.DataFrame()
+        
+    # 2. Récupérer les codes des centrales dynamiquement (comme dans ta collecte)
+    stations = client.get_stations()
+    mapping = {}
+    for s in stations:
+        code = s.get("plantCode") or s.get("stationCode")
+        nom = s.get("plantName") or s.get("stationName")
+        key = match_site(nom)
+        if key and code:
+            mapping[code] = SITES_REF[key]["nom"]
+            
+    if not mapping:
+        return pd.DataFrame()
+        
+    # 3. Interroger l'API pour les données horaires du jour
+    aujourdhui = date.today()
+    data_brute = client.get_hourly_kpi(list(mapping.keys()), aujourdhui)
+    
+    # 4. Formater les données pour Streamlit
+    lignes = []
+    for item in data_brute:
+        code = item.get("stationCode") or item.get("plantCode")
+        if code not in mapping:
+            continue
+            
+        temps = pd.to_datetime(item.get("collectTime"), unit="ms", utc=True).tz_convert("Europe/Paris")
+        map_data = item.get("dataItemMap", {})
+        
+        # Selon ce que renvoie l'API, cherche la puissance de l'onduleur ou la puissance active
+        puissance = map_data.get("inverter_power") or map_data.get("active_power") or 0.0
+        
+        lignes.append({
+            "Site": mapping[code],
+            "Heure": temps,
+            "Puissance (kW)": float(puissance)
+        })
+        
+    return pd.DataFrame(lignes)
