@@ -7,23 +7,23 @@ on:
 jobs:
   collecte:
     runs-on: ubuntu-latest
-    steps:
-      - name: Récupérer le projet
-        uses: actions/checkout@v4
-      - name: Installer Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-      - name: Installer les dépendances 
-      run: pip install -r requirements.txt
-      - name: Exécuter la collecte des données FusionSolar
-      env: 
-        FUSIONSOLAR_USER: ${{ secrets.FUSIONSOLAR\_USER }}
-        FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR\_PASSWORD }}
-      run: python collect\_data.py
-      - name: Enregistrer la base de données mise à jour
-      run: |
-        git config user.name "Robot Collecte Mauges"
-        git config user.email "bot@maugesenergies.fr" 
-        git add production\_ombrieres.db
-        git diff --quiet &amp;&amp; git diff --staged --quiet || (git commit -m "Mise à jour automatique production PV [skip ci]" &amp;&amp; git push)
+        steps:
+          - name: Récupérer le projet
+            uses: actions/checkout@v4
+          - name: Installer Python
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+          - name: Installer les dépendances 
+          run: pip install -r requirements.txt
+          - name: Exécuter la collecte des données FusionSolar
+          env: 
+            FUSIONSOLAR_USER: ${{ secrets.FUSIONSOLAR_USER }}
+            FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD }}
+          run: python collect_data.py
+          - name: Enregistrer la base de données mise à jour
+          run: |
+            git config user.name "Robot Collecte Mauges"
+            git config user.email "bot@maugesenergies.fr" 
+            git add production_ombrieres.db
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Mise à jour automatique production PV [skip ci]" && git push)
