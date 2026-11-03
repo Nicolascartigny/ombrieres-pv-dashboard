@@ -24,6 +24,7 @@ jobs:
         
       - name: Exécuter la collecte des données FusionSolar
         env: 
+          FUSIONSOLAR_URL: "https://eu5.fusionsolar.huawei.com" # URL dédiée à l'API
           FUSIONSOLAR_USER: ${{ secrets.FUSIONSOLAR_USER }}
           FUSIONSOLAR_PASSWORD: ${{ secrets.FUSIONSOLAR_PASSWORD }}
         run: python collect_data.py
