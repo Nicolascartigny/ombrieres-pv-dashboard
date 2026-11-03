@@ -162,20 +162,29 @@ st.caption(f"{n_sites} site(s) sur {len(SITES_REF)} dans les données ({fmt(kwc_
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique en Direct
+# ---------------------------------------------------------------- Graphique en Direct (Plotly Amélioré)
 st.subheader("⚡ Puissance en direct (Aujourd'hui)")
 
 with st.spinner("Récupération des données en temps réel depuis FusionSolar..."):
     df_direct = get_courbes_du_jour()
 
 if not df_direct.empty:
-    st.line_chart(
-        data=df_direct,
+    fig_direct = px.line(
+        df_direct,
         x="Heure",
         y="Puissance (kW)",
         color="Site",
-        use_container_width=True
+        color_discrete_map=COULEURS,
+        markers=True,
+        labels={"Puissance (kW)": "Puissance (kW)", "Heure": ""}
     )
+    fig_direct.update_traces(line=dict(width=2.5), marker=dict(size=5))
+    fig_direct.update_layout(
+        margin=dict(t=30, b=10),
+        legend=dict(orientation="h", y=-0.25, title=None),
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig_direct, width="stretch")
     st.caption("Données actualisées toutes les 10 minutes (Appuyez sur 'R' ou actualisez la page pour forcer la mise à jour).")
 else:
     st.info("Les données horaires en direct sont indisponibles pour le moment. Vérifiez vos identifiants dans les secrets Streamlit.")
