@@ -183,25 +183,31 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique 1
-st.subheader("Production cumulée vs objectif annuel")
-journalier = dfy.groupby("date")["kwh_produits"].sum().sort_index()
-jours = pd.date_range(journalier.index.min(), journalier.index.max())
-cumul = journalier.reindex(jours, fill_value=0).cumsum() / 1000
-debut, fin = pd.Timestamp(annee, 1, 1), pd.Timestamp(annee, 12, 31)
-obj_mwh = OBJECTIF_ANNUEL_KWH / 1000
+# ---------------------------------------------------------------- Graphique 1 : Rémunération
+st.subheader("💶 Rémunération mensuelle estimée")
 
-fig1 = go.Figure()
-fig1.add_trace(go.Scatter(x=cumul.index, y=cumul.values, mode="lines", fill="tozeroy",
-                          name="Production cumulée", line=dict(color="#2a9d8f")))
-fig1.add_trace(go.Scatter(x=[debut, fin], y=[0, obj_mwh], mode="lines",
-                          name="Trajectoire linéaire", line=dict(color="gray", dash="dot")))
-fig1.add_hline(y=obj_mwh, line_dash="dash", line_color="crimson",
-               annotation_text=f"Objectif annuel {fmt(obj_mwh)} MWh", annotation_position="top left")
-fig1.update_layout(yaxis_title="MWh cumulés", xaxis_range=[debut, fin],
-                   yaxis_range=[0, max(obj_mwh, cumul.max()) * 1.1],
-                   margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.15))
-st.plotly_chart(fig1, width="stretch")
+# Calcul de la rémunération
+df_rem = (dfy.assign(mois=dfy["date"].dt.month)
+             .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
+df_rem["MWh"] = df_rem["kwh_produits"] / 1000
+df_rem["Mois"] = df_rem["mois"].map(lambda m: MOIS[m - 1])
+
+# Tarifs définis pour chaque centrale
+TARIFS = {
+    "Les Minières (MSE)": 95.0,
+    "Mauges Communauté (MC)": 95.0,
+    "La Loge (BEM)": 95.0,
+    "Complexe Sportif (SEV)": 91.2
+}
+# Application du tarif (par défaut à 95.0 €/MWh pour CEA et ODA s'ils produisent)
+df_rem["Tarif (€/MWh)"] = df_rem["site"].map(lambda s: TARIFS.get(s, 95.0))
+df_rem["Rémunération (€)"] = df_rem["MWh"] * df_rem["Tarif (€/MWh)"]
+
+fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmode="stack",
+                 category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
+                 labels={"site": "Site", "Rémunération (€)": "Revenus (€)"})
+fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.15, title=None))
+st.plotly_chart(fig_rem, width="stretch")
 
 # ---------------------------------------------------------------- Graphiques 2 et 3
 g2, g3 = st.columns(2)
