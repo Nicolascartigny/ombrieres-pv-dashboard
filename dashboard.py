@@ -183,30 +183,27 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique 1 : Rémunération
+# ---------------------------------------------------------------- Graphique 1 : Rémunération (en barres groupées)
 st.subheader("💶 Rémunération mensuelle estimée")
 
-# Calcul de la rémunération
 df_rem = (dfy.assign(mois=dfy["date"].dt.month)
              .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
 df_rem["MWh"] = df_rem["kwh_produits"] / 1000
 df_rem["Mois"] = df_rem["mois"].map(lambda m: MOIS[m - 1])
 
-# Tarifs définis pour chaque centrale
 TARIFS = {
     "Les Minières (MSE)": 95.0,
     "Mauges Communauté (MC)": 95.0,
     "La Loge (BEM)": 95.0,
     "Complexe Sportif (SEV)": 91.2
 }
-# Application du tarif (par défaut à 95.0 €/MWh pour CEA et ODA s'ils produisent)
 df_rem["Tarif (€/MWh)"] = df_rem["site"].map(lambda s: TARIFS.get(s, 95.0))
 df_rem["Rémunération (€)"] = df_rem["MWh"] * df_rem["Tarif (€/MWh)"]
 
-fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmode="stack",
+fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmode="group",
                  category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
                  labels={"site": "Site", "Rémunération (€)": "Revenus (€)"})
-fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.15, title=None))
+fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
 st.plotly_chart(fig_rem, width="stretch")
 
 # ---------------------------------------------------------------- Graphiques 2 et 3
@@ -231,7 +228,8 @@ with g3:
                   .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
     mensuel["MWh"] = mensuel["kwh_produits"] / 1000
     mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
-    fig3 = px.bar(mensuel, x="Mois", y="MWh", color="site", barmode="stack",
+    # Passage en barmode="group" pour éviter l'empilement
+    fig3 = px.bar(mensuel, x="Mois", y="MWh", color="site", barmode="group",
                   category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
                   labels={"site": "Site"})
     fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
