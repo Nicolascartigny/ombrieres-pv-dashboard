@@ -124,7 +124,6 @@ with st.sidebar:
         st.rerun()
 
 dfy = df[df["date"].dt.year == annee]
-# Calcul dynamique de l'objectif cumulé uniquement pour les sites actifs en base
 sites_actifs = dfy["site"].unique()
 objectif_annuel_mwh = sum(OBJECTIFS_PAR_SITE.get(site, 0) for site in sites_actifs)
 OBJECTIF_ANNUEL_KWH = objectif_annuel_mwh * 1000
@@ -183,7 +182,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique 1 : Rémunération (en barres groupées)
+# ---------------------------------------------------------------- Graphique 1 : Rémunération mensuelle estimée
 st.subheader("💶 Rémunération mensuelle estimée")
 
 df_rem = (dfy.assign(mois=dfy["date"].dt.month)
@@ -206,7 +205,7 @@ fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmo
 fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
 st.plotly_chart(fig_rem, width="stretch")
 
-# ---------------------------------------------------------------- Graphiques 2 et 3
+# ---------------------------------------------------------------- Graphiques 2 et 3 (Performance & Production YTD / Mensuelle)
 g2, g3 = st.columns(2)
 
 with g2:
@@ -223,17 +222,27 @@ with g2:
     st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site : compare les sites indépendamment de leur taille et de leur date de mise en service.")
 
 with g3:
-    st.subheader("Répartition mensuelle par site")
+    st.subheader("Production mensuelle par site (kWh)")
     mensuel = (dfy.assign(mois=dfy["date"].dt.month)
                   .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-    mensuel["MWh"] = mensuel["kwh_produits"] / 1000
+    mensuel["kWh"] = mensuel["kwh_produits"]
     mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
-    # Passage en barmode="group" pour éviter l'empilement
-    fig3 = px.bar(mensuel, x="Mois", y="MWh", color="site", barmode="group",
+    fig3 = px.bar(mensuel, x="Mois", y="kWh", color="site", barmode="group",
                   category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
-                  labels={"site": "Site"})
+                  labels={"site": "Site", "kWh": "Production (kWh)"})
     fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
     st.plotly_chart(fig3, width="stretch")
+
+# ---------------------------------------------------------------- Graphique 4 : Production totale depuis le début de l'année
+st.subheader("📈 Production totale par site depuis le début de l'année")
+df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+df_ytd["MWh"] = df_ytd["kwh_produits"] / 1000
+
+fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text_auto=".1f",
+                 color_discrete_map=COULEURS,
+                 labels={"kwh_produits": "Production totale (kWh)", "site": ""})
+fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_ytd, width="stretch")
 
 with st.expander("Données journalières récentes"):
     recent = dfy.sort_values(["date", "site"], ascending=[False, True])
