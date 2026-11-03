@@ -1,15 +1,23 @@
-import streamlit as st
+import os
 import pandas as pd
+import streamlit as st
 from datetime import date
+
+# Import des outils que tu as déjà codés dans collect_data.py
 from collect_data import FusionSolarClient, SITES_REF, match_site
 
-# 1. Récupération des secrets Streamlit
+# =====================================================================
+# 1. FONCTION DE RÉCUPÉRATION EN DIRECT (À mettre avant l'affichage)
+# =====================================================================
+
+# Récupération des identifiants stockés dans les secrets de Streamlit Cloud
 fs_user = st.secrets.get("FUSIONSOLAR_USER")
 fs_pass = st.secrets.get("FUSIONSOLAR_PASSWORD")
 fs_url = st.secrets.get("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")
 
-@st.cache_data(ttl=600) # Cache de 10 minutes (600 secondes) pour préserver les quotas de l'API
+@st.cache_data(ttl=600) # Garde les données en mémoire 10 minutes pour ne pas saturer l'API
 def get_courbes_du_jour():
+    """Interroge FusionSolar pour récupérer la puissance heure par heure de la journée en cours."""
     if not fs_user or not fs_pass:
         return pd.DataFrame()
         
@@ -17,7 +25,7 @@ def get_courbes_du_jour():
     if not client.login():
         return pd.DataFrame()
         
-    # 2. Récupérer les codes des centrales dynamiquement (comme dans ta collecte)
+    # Identification des centrales sur le compte
     stations = client.get_stations()
     mapping = {}
     for s in stations:
@@ -30,11 +38,11 @@ def get_courbes_du_jour():
     if not mapping:
         return pd.DataFrame()
         
-    # 3. Interroger l'API pour les données horaires du jour
+    # Interrogation de l'API pour aujourd'hui
     aujourdhui = date.today()
     data_brute = client.get_hourly_kpi(list(mapping.keys()), aujourdhui)
     
-    # 4. Formater les données pour Streamlit
+    # Formatage des données pour le graphique
     lignes = []
     for item in data_brute:
         code = item.get("stationCode") or item.get("plantCode")
@@ -44,7 +52,7 @@ def get_courbes_du_jour():
         temps = pd.to_datetime(item.get("collectTime"), unit="ms", utc=True).tz_convert("Europe/Paris")
         map_data = item.get("dataItemMap", {})
         
-        # Selon ce que renvoie l'API, cherche la puissance de l'onduleur ou la puissance active
+        # Puissance instantanée renvoyée par Huawei (inverter_power ou active_power)
         puissance = map_data.get("inverter_power") or map_data.get("active_power") or 0.0
         
         lignes.append({
@@ -54,3 +62,27 @@ def get_courbes_du_jour():
         })
         
     return pd.DataFrame(lignes)
+
+
+# =====================================================================
+# 2. AFFICHAGE DANS L'INTERFACE STREAMLIT (À mettre là où tu veux le graphique)
+# =====================================================================
+
+st.markdown("---")
+st.subheader("⚡ Puissance en direct (Aujourd'hui)")
+
+with st.spinner("Récupération des données en temps réel depuis FusionSolar..."):
+    df_direct = get_courbes_du_jour()
+
+if not df_direct.empty:
+    # Création du graphique avec Streamlit
+    st.line_chart(
+        data=df_direct,
+        x="Heure",
+        y="Puissance (kW)",
+        color="Site",
+        use_container_width=True
+    )
+    st.caption("Données actualisées toutes les 10 minutes (Appuyez sur 'R' ou actualisez la page pour forcer la mise à jour).")
+else:
+    st.info("Les données horaires en direct sont indisponibles pour le moment. Vérifiez vos identifiants dans les secrets Streamlit.")
