@@ -7,7 +7,6 @@ on:
 jobs:
   collecte:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Récupérer le projet
         uses: actions/checkout@v4
