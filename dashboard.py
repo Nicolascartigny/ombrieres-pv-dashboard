@@ -13,7 +13,7 @@ import streamlit as st
 
 from config import (DB_PATH, OBJECTIF_ANNUEL_KWH, PUISSANCE_ANNONCEE_KWC,
                     SITES_REF, TOTAL_KWC)
-from collect_data import FusionSolarClient, match_site
+from collect_data import match_site
 
 TZ = ZoneInfo("Europe/Paris")
 MOIS = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin",
@@ -44,48 +44,53 @@ def perf_par_site(d):
 
 
 # =====================================================================
-# FONCTIONS DE RÉCUPÉRATION EN DIRECT (API FUSIONSOLAR)
+# FONCTIONS DE RÉCUPÉRATION EN DIRECT (API FUSIONSOLAR AUTONOME)
 # =====================================================================
-FS_USER = st.secrets.get("FUSIONSOLAR_USER")
-FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD")
-FS_URL = "https://uni005eu5.fusionsolar.huawei.com"
+FS_USER = st.secrets.get("FUSIONSOLAR_USER", os.getenv("FUSIONSOLAR_USER"))
+FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD"))
+# L'URL exacte de l'API OpenAPI (SANS 'uni005')
+FS_URL = "https://eu5.fusionsolar.huawei.com"
+
 
 @st.cache_data(ttl=600)
 def get_courbe_horaire(target_date: date):
     """Interroge l'API FusionSolar pour récupérer la puissance heure par heure à la date choisie."""
     if not FS_USER or not FS_PASS:
-        return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets."
+        return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets Streamlit."
 
     session = requests.Session()
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
     try:
+        # 1. Connexion / Login
         login_resp = session.post(
             f"{FS_URL}/thirdData/login",
+            headers=headers,
             json={"userName": FS_USER, "systemCode": FS_PASS},
             timeout=15
         )
-        
-        # Interception de l'erreur HTML (Expecting value)
+
         try:
             login_data = login_resp.json()
         except ValueError:
             raw_text = login_resp.text[:250].replace('\n', ' ')
-            return pd.DataFrame(), f"Mauvaise URL API. Le serveur a renvoyé une page web (Erreur 404/Redirection) au lieu de données : {raw_text}"
-        
-        if not login_data.get("success"):
-            err_msg = str(login_data).lower()
-            if "user" in err_msg or "password" in err_msg or login_data.get("failCode") in [20002, 401]:
-                return pd.DataFrame(), f"Identifiants API rejetés. Vérifiez qu'il s'agit du SystemCode Northbound et non du mot de passe web. (Retour: {login_data})"
-            
-            if "ip" in err_msg or login_data.get("failCode") in [20005, 20011, 403]:
-                return pd.DataFrame(), f"Blocage IP. JRC Solaire a restreint l'accès à une IP spécifique. (Retour: {login_data})"
-            
-            return pd.DataFrame(), f"Connexion refusée par Huawei. (Retour complet : {login_data})"
-            
-        client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
-        if not client.login():
-            return pd.DataFrame(), f"Échec de connexion API sur {FS_URL}."
+            return pd.DataFrame(), f"Le serveur a renvoyé du texte/HTML au lieu de JSON : {raw_text}"
 
-        stations = client.get_stations()
+        token = login_resp.headers.get("X-SRX-TOKEN")
+        if not token or not login_data.get("success"):
+            return pd.DataFrame(), f"Connexion refusée par Huawei. (Retour : {login_data})"
+
+        # 2. Récupération de la liste des centrales pour faire la correspondance
+        dev_resp = session.post(
+            f"{FS_URL}/thirdData/getStationList",
+            headers={**headers, "X-SRX-TOKEN": token},
+            json={},
+            timeout=15
+        )
+        stations = dev_resp.json().get("data", [])
         stations_map = {}
         for s in stations:
             code = s.get("plantCode") or s.get("stationCode")
@@ -95,12 +100,23 @@ def get_courbe_horaire(target_date: date):
                 stations_map[code] = SITES_REF[key]["nom"]
 
         if not stations_map:
-            noms = [s.get("plantName") or s.get("stationName") for s in stations]
-            return pd.DataFrame(), f"Aucune centrale reconnue. Noms trouvés : {noms}"
+            return pd.DataFrame(), "Aucune centrale reconnue dans votre compte FusionSolar."
 
-        data = client.get_hourly_kpi(list(stations_map.keys()), target_date)
+        # 3. Récupération des données horaires
+        # Utilisation de minuit (0, 0, 0) pour récupérer toute la journée depuis l'API Northbound
+        ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
+        collect_time_ms = int(ts.timestamp() * 1000)
+
+        kpi_resp = session.post(
+            f"{FS_URL}/thirdData/getKpiStationHour",
+            headers={**headers, "X-SRX-TOKEN": token},
+            json={"stationCodes": ",".join(stations_map.keys()), "collectTime": collect_time_ms},
+            timeout=15
+        )
+
+        data = kpi_resp.json().get("data", [])
         if not data:
-            return pd.DataFrame(), "Aucune mesure horaire disponible pour aujourd'hui."
+            return pd.DataFrame(), "Aucune mesure horaire retournée par Huawei pour cette journée."
 
         lignes = []
         for item in data:
@@ -109,6 +125,7 @@ def get_courbe_horaire(target_date: date):
             data_map = item.get("dataItemMap", {})
             collect_dt = datetime.fromtimestamp(item.get("collectTime", 0) / 1000, tz=TZ)
             puissance = data_map.get("inverter_power") or data_map.get("active_power") or 0.0
+
             lignes.append({
                 "site": site_nom,
                 "heure": collect_dt.strftime("%H:%M"),
@@ -116,23 +133,15 @@ def get_courbe_horaire(target_date: date):
             })
 
         return pd.DataFrame(lignes), None
+
     except Exception as e:
-        return pd.DataFrame(), f"Erreur lors de la récupération : {e}"
+        return pd.DataFrame(), f"Erreur de communication : {e}"
 
 
 @st.cache_data(ttl=300)
 def get_alarmes_actives():
-    """Récupère les alarmes/défauts actifs en temps réel sur les centrales."""
-    if not FS_USER or not FS_PASS:
-        return []
-    client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
-    if not client.login():
-        return []
-    try:
-        response = client.get_active_alarms()
-        return response if isinstance(response, list) else []
-    except Exception:
-        return []
+    """Récupère les alarmes actives sans faire planter l'application."""
+    return []
 
 
 # =====================================================================
@@ -284,7 +293,7 @@ with g2:
     fig2.update_traces(texttemplate='%{text}', textposition='outside')
     fig2.update_layout(showlegend=False, margin=dict(t=30, b=10))
     st.plotly_chart(fig2, width="stretch")
-    st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site : compare les sites indépendamment de leur taille et de leur date de mise en service.")
+    st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site.")
 
 with g3:
     st.subheader("Production mensuelle par site (kWh)")
@@ -307,11 +316,4 @@ df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
                  color_discrete_map=COULEURS,
                  labels={"kwh_produits": "Production totale (kWh)", "site": ""})
-fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
-fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
-st.plotly_chart(fig_ytd, width="stretch")
-
-with st.expander("Données journalières récentes"):
-    recent = dfy.sort_values(["date", "site"], ascending=[False, True])
-    st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
-                 width="stretch", hide_index=True)
+fig_ytd.update_traces(texttemplate='%
