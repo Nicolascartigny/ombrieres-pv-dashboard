@@ -51,9 +51,9 @@ FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD
 FS_URL = "https://eu5.fusionsolar.huawei.com"
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def get_courbe_horaire(target_date: date):
-    """Récupère la puissance en vrai temps réel (5 min) en interrogeant directement les onduleurs."""
+    """Interroge l'API FusionSolar pour récupérer la puissance heure par heure (seule granularité autorisée par l'API Huawei)."""
     if not FS_USER or not FS_PASS:
         return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets Streamlit."
 
@@ -75,7 +75,8 @@ def get_courbe_horaire(target_date: date):
         try:
             login_data = login_resp.json()
         except ValueError:
-            return pd.DataFrame(), "Le serveur a renvoyé du texte/HTML au lieu de JSON."
+            raw_text = login_resp.text[:250].replace('\n', ' ')
+            return pd.DataFrame(), f"Le serveur a renvoyé du texte/HTML au lieu de JSON : {raw_text}"
 
         token = (login_resp.headers.get("xsrf-token") or 
                  login_resp.headers.get("X-SRX-TOKEN") or 
@@ -85,12 +86,17 @@ def get_courbe_horaire(target_date: date):
             return pd.DataFrame(), f"Connexion refusée par Huawei. (Retour : {login_data})"
             
         if not token:
-            return pd.DataFrame(), "Login réussi mais jeton introuvable."
+            return pd.DataFrame(), f"Login réussi mais jeton introuvable. (En-têtes reçus : {dict(login_resp.headers)})"
 
         auth_headers = {**headers, "X-SRX-TOKEN": token, "xsrf-token": token}
 
-        # 2. Découverte des centrales
-        dev_resp = session.post(f"{FS_URL}/thirdData/getStationList", headers=auth_headers, json={}, timeout=15)
+        # 2. Récupération de la liste des centrales pour faire la correspondance
+        dev_resp = session.post(
+            f"{FS_URL}/thirdData/getStationList",
+            headers=auth_headers,
+            json={},
+            timeout=15
+        )
         stations = dev_resp.json().get("data", [])
         stations_map = {}
         for s in stations:
@@ -101,106 +107,38 @@ def get_courbe_horaire(target_date: date):
                 stations_map[code] = SITES_REF[key]["nom"]
 
         if not stations_map:
-            return pd.DataFrame(), "Aucune centrale reconnue."
+            return pd.DataFrame(), "Aucune centrale reconnue dans votre compte FusionSolar."
 
-        # 3. Découverte automatique des onduleurs sur ces centrales
-        inv_resp = session.post(
-            f"{FS_URL}/thirdData/getDevList", 
-            headers=auth_headers, 
-            json={"stationCodes": ",".join(stations_map.keys())}, 
+        # 3. Récupération des données horaires (Seul point d'entrée historique autorisé)
+        ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
+        collect_time_ms = int(ts.timestamp() * 1000)
+
+        kpi_resp = session.post(
+            f"{FS_URL}/thirdData/getKpiStationHour",
+            headers=auth_headers,
+            json={"stationCodes": ",".join(stations_map.keys()), "collectTime": collect_time_ms},
             timeout=15
         )
-        devices = inv_resp.json().get("data", [])
-        
-        inverters = {}
-        for dev in devices:
-            dev_type = dev.get("devTypeId")
-            # devTypeId 1 = String Inverter, 38 = Micro-onduleur
-            if dev_type in [1, 2, 38]:
-                inverters[dev.get("id")] = {
-                    "stationCode": dev.get("stationCode"),
-                    "devTypeId": dev_type
-                }
-                
-        if not inverters:
-            return pd.DataFrame(), "Aucun onduleur détecté sur les centrales."
 
-        # 4. Récupération de l'historique 5-min par onduleur avec DIAGNOSTIC
-        ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
-        start_ms = int(ts.timestamp() * 1000)
-        end_ms = int(datetime.now(TZ).timestamp() * 1000)
-        
-        all_history = []
-        types_to_query = set(v["devTypeId"] for v in inverters.values())
-        
-        for dtype in types_to_query:
-            ids = [str(k) for k, v in inverters.items() if v["devTypeId"] == dtype]
-            
-            for i in range(0, len(ids), 90):
-                chunk = ids[i:i+90]
-                hist_resp = session.post(
-                    f"{FS_URL}/thirdData/getDevHistory",
-                    headers=auth_headers,
-                    json={
-                        "devIds": ",".join(chunk), 
-                        "devTypeId": dtype, 
-                        "startTime": start_ms, 
-                        "endTime": end_ms
-                    },
-                    timeout=25
-                )
-                
-                hist_json = hist_resp.json()
-                
-                # DIAGNOSTIC : On vérifie si Huawei bloque spécifiquement cette requête
-                if not hist_json.get("success"):
-                    return pd.DataFrame(), f"Refus API sur les onduleurs (Code {hist_json.get('failCode')}) : {hist_json.get('message', hist_json)}"
-                
-                all_history.extend(hist_json.get("data", []))
+        data = kpi_resp.json().get("data", [])
+        if not data:
+            return pd.DataFrame(), "Aucune mesure horaire retournée par Huawei pour cette journée."
 
-        if not all_history:
-            return pd.DataFrame(), "L'API a répondu 'succès', mais le tableau 'data' est totalement vide pour vos onduleurs."
-
-        # 5. Traitement et Aggrégation des données
-        records = []
-        for item in all_history:
-            dev_id = item.get("devId")
-            if dev_id not in inverters:
-                continue
-                
-            st_code = inverters[dev_id]["stationCode"]
-            site_nom = stations_map.get(st_code, st_code)
-            
-            collect_time = item.get("collectTime", 0)
+        lignes = []
+        for item in data:
+            code = item.get("stationCode") or item.get("plantCode")
+            site_nom = stations_map.get(code, code)
             data_map = item.get("dataItemMap", {})
-            
-            # Recherche de la puissance sous plusieurs noms possibles
-            puissance = data_map.get("active_power")
-            if puissance is None:
-                puissance = data_map.get("inverter_power")
-                
-            if puissance is not None:
-                records.append({
-                    "site": site_nom,
-                    "collectTime": collect_time,
-                    "puissance_kw": float(puissance)
-                })
+            collect_dt = datetime.fromtimestamp(item.get("collectTime", 0) / 1000, tz=TZ)
+            puissance = data_map.get("inverter_power") or data_map.get("active_power") or 0.0
 
-        if not records:
-            return pd.DataFrame(), f"Les onduleurs ont bien renvoyé un historique, mais la variable de puissance (active_power) est introuvable. Variables trouvées : {list(all_history[0].get('dataItemMap', {}).keys())}"
+            lignes.append({
+                "site": site_nom,
+                "heure": collect_dt.strftime("%H:%M"),
+                "puissance_kw": float(puissance)
+            })
 
-        df_inv = pd.DataFrame(records)
-        
-        # Convertir le timestamp en heure française et arrondir aux 5 minutes
-        df_inv["heure_dt"] = pd.to_datetime(df_inv["collectTime"], unit="ms", utc=True).dt.tz_convert(TZ)
-        df_inv["heure_dt"] = df_inv["heure_dt"].dt.round("5min")
-        df_inv["heure"] = df_inv["heure_dt"].dt.strftime("%H:%M")
-
-        # Grouper par site et par heure, puis faire la somme des puissances
-        df_direct = df_inv.groupby(["site", "heure"], as_index=False)["puissance_kw"].sum()
-        df_direct = df_direct.sort_values(by=["heure", "site"])
-
-        return df_direct, None
+        return pd.DataFrame(lignes), None
 
     except Exception as e:
         return pd.DataFrame(), f"Erreur de communication : {e}"
@@ -287,7 +225,7 @@ st.divider()
 # ---------------------------------------------------------------- Graphique en Direct
 st.subheader("⚡ Puissance en direct (Aujourd'hui)")
 
-with st.spinner("Récupération de la télémétrie des onduleurs en temps réel..."):
+with st.spinner("Récupération des données en temps réel depuis FusionSolar..."):
     df_direct, direct_err = get_courbe_horaire(date.today())
 
 if df_direct is not None and not df_direct.empty:
@@ -297,21 +235,20 @@ if df_direct is not None and not df_direct.empty:
         y="puissance_kw",
         color="site",
         color_discrete_map=COULEURS,
-        markers=False,
+        markers=True,
         labels={"puissance_kw": "Puissance (kW)", "heure": ""}
     )
-    # Rendu plus fluide pour le pas de 5 min (courbe spline sans les gros points)
-    fig_direct.update_traces(line=dict(width=2.5, shape="spline"), mode="lines")
+    fig_direct.update_traces(line=dict(width=2.5), marker=dict(size=5))
     fig_direct.update_layout(
         margin=dict(t=30, b=10),
         legend=dict(orientation="h", y=-0.25, title=None),
         hovermode="x unified"
     )
     st.plotly_chart(fig_direct, width="stretch")
-    st.caption("Données actualisées toutes les 5 à 10 minutes (Appuyez sur 'R' pour forcer la mise à jour).")
+    st.caption("Données horaires de l'API. Un délai de consolidation de 1 à 2 heures est normal du côté de Huawei.")
 else:
     msg = direct_err or "Vérifiez vos identifiants dans les secrets Streamlit."
-    st.info(f"Les données en direct sont indisponibles pour le moment. {msg}")
+    st.info(f"Les données horaires en direct sont indisponibles pour le moment. {msg}")
 
 st.divider()
 
