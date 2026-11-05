@@ -48,7 +48,6 @@ def perf_par_site(d):
 # =====================================================================
 FS_USER = st.secrets.get("FUSIONSOLAR_USER", os.getenv("FUSIONSOLAR_USER"))
 FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD"))
-# L'URL exacte de l'API OpenAPI (SANS 'uni005')
 FS_URL = "https://eu5.fusionsolar.huawei.com"
 
 
@@ -103,7 +102,6 @@ def get_courbe_horaire(target_date: date):
             return pd.DataFrame(), "Aucune centrale reconnue dans votre compte FusionSolar."
 
         # 3. Récupération des données horaires
-        # Utilisation de minuit (0, 0, 0) pour récupérer toute la journée depuis l'API Northbound
         ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
         collect_time_ms = int(ts.timestamp() * 1000)
 
@@ -316,4 +314,11 @@ df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
                  color_discrete_map=COULEURS,
                  labels={"kwh_produits": "Production totale (kWh)", "site": ""})
-fig_ytd.update_traces(texttemplate='%
+fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
+fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_ytd, width="stretch")
+
+with st.expander("Données journalières récentes"):
+    recent = dfy.sort_values(["date", "site"], ascending=[False, True])
+    st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
+                 width="stretch", hide_index=True)
