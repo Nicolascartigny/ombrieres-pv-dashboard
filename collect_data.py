@@ -93,11 +93,13 @@ class FusionSolarClient:
             print(f"Échec de connexion API : {data}")
             return False
         token = (resp.headers.get("xsrf-token") or resp.headers.get("xsfr-token")
+                 or resp.headers.get("X-SRX-TOKEN")
                  or self.session.cookies.get("XSRF-TOKEN"))
         if not token:
             print("Connexion acceptée mais aucun jeton XSRF reçu.")
             return False
         self.session.headers["XSRF-TOKEN"] = token
+        self.session.headers["X-SRX-TOKEN"] = token
         print("Connexion à l'API FusionSolar réussie.")
         return True
 
@@ -142,18 +144,25 @@ class FusionSolarClient:
 
     def get_daily_kpi(self, station_codes, any_day: date):
         ts = datetime(any_day.year, any_day.month, any_day.day, 12, tzinfo=TZ)
-        payload = {"stationCodes": ",".join(station_codes), "collectTime":
-int(ts.timestamp() * 1000)}       
+        payload = {"stationCodes": ",".join(station_codes), "collectTime": int(ts.timestamp() * 1000)}
         return self._post("getKpiStationDay", payload).get("data") or []
-    
+
     def get_hourly_kpi(self, station_codes, any_day: date):
         """Récupère la courbe de puissance horaire/infra-journalière du jour."""
-        ts = datetime(any_day.year, any_day.month, any_day.day, 12, tzinfo=TZ)
+        ts = datetime(any_day.year, any_day.month, any_day.day, 0, 0, 0, tzinfo=TZ)
         payload = {
             "stationCodes": ",".join(station_codes),
-            "collectTime": int(ts.timestamp() * 1000)   
+            "collectTime": int(ts.timestamp() * 1000)
         }
-        return self._post("getKpiStationHour", payload).get("data") or []     
+        return self._post("getKpiStationHour", payload).get("data") or []
+
+    def get_active_alarms(self, station_codes=None):
+        """Récupère la liste des alarmes actives."""
+        payload = {"status": 1}
+        if station_codes:
+            payload["stationCodes"] = ",".join(station_codes)
+        return self._post("getAlarmList", payload).get("data") or []
+
 
 def _as_float(value):
     try:
@@ -173,7 +182,6 @@ def collect_real(client, since: date, until: date) -> bool:
     stations = client.get_stations()
     mapping = {}
     for s in stations:
-        # /stations renvoie plantCode/plantName ; l'ancien getStationList stationCode/stationName
         nom = s.get("plantName") or s.get("stationName") or ""
         code = s.get("plantCode") or s.get("stationCode")
         key = match_site(nom)
@@ -207,7 +215,7 @@ def collect_real(client, since: date, until: date) -> bool:
             key, name = mapping[code]
             kwc = SITES_REF[key]["kwc"]
             records.append((jour.isoformat(), key, code, name, kwh, round(kwh / kwc, 3), "api"))
-        time.sleep(2)  # ménage le quota de l'API
+        time.sleep(2)
 
     if not records:
         print("Aucune donnée journalière renvoyée par l'API.")
@@ -222,7 +230,7 @@ def mock_ratio(jour: date, site_key: str) -> float:
     """kWh/kWc réaliste : saison (Anjou ~1 070 kWh/kWc/an), météo commune, facteur site."""
     doy = jour.timetuple().tm_yday
     saison = 2.95 + 2.15 * math.sin(2 * math.pi * (doy - 80) / 365)
-    meteo = 0.3 + 1.4 * random.Random(jour.isoformat()).betavariate(2, 2)   # identique pour tous les sites
+    meteo = 0.3 + 1.4 * random.Random(jour.isoformat()).betavariate(2, 2)
     facteur_site = random.Random(site_key).uniform(0.95, 1.05)
     bruit = random.Random(f"{jour.isoformat()}-{site_key}").uniform(0.97, 1.03)
     return round(max(0.1, min(6.5, saison * meteo * facteur_site * bruit)), 3)
@@ -253,7 +261,7 @@ def main() -> int:
 
     base_url = os.getenv("FUSIONSOLAR_URL") or DEFAULT_URL
     user = os.getenv("FUSIONSOLAR_USER") or ""
-    password = os.getenv("FUSIONSOLAR_PASSWORD") or ""
+    password = os.getenv("FUSIONSOLAR_PASSWORD") or os.getenv("FUSIONSOLAR_PASS") or ""
     creds_ok = bool(user and password) and not user.startswith("votre_") and not password.startswith("votre_")
 
     if args.mock or os.getenv("MOCK") == "1" or not creds_ok:
