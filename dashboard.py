@@ -53,7 +53,7 @@ FS_URL = "https://eu5.fusionsolar.huawei.com"
 
 @st.cache_data(ttl=600)
 def get_courbe_horaire(target_date: date):
-    """Interroge l'API FusionSolar pour récupérer la puissance heure par heure (seule granularité autorisée par l'API Huawei)."""
+    """Interroge l'API FusionSolar pour récupérer la puissance heure par heure."""
     if not FS_USER or not FS_PASS:
         return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets Streamlit."
 
@@ -186,6 +186,11 @@ sites_actifs = dfy["site"].unique()
 objectif_annuel_mwh = sum(OBJECTIFS_PAR_SITE.get(site, 0) for site in sites_actifs)
 OBJECTIF_ANNUEL_KWH = objectif_annuel_mwh * 1000
 
+# --- CALCUL DE L'ORDRE DYNAMIQUE DES SITES (Du plus productif au moins productif) ---
+df_ytd_global = dfy.groupby("site", as_index=False)["kwh_produits"].sum().sort_values("kwh_produits", ascending=False)
+ordre_sites = df_ytd_global["site"].tolist()
+# ------------------------------------------------------------------------------------
+
 if (dfy["source"] == "mock").any():
     st.info("Données de démonstration (mode MOCK) : renseignez les identifiants FusionSolar pour les données réelles.")
 
@@ -234,6 +239,7 @@ if df_direct is not None and not df_direct.empty:
         x="heure",
         y="puissance_kw",
         color="site",
+        category_orders={"site": ordre_sites},
         color_discrete_map=COULEURS,
         markers=True,
         labels={"puissance_kw": "Puissance (kW)", "heure": ""}
@@ -268,7 +274,7 @@ fig_mensuel = px.bar(
     color="site", 
     barmode="group",
     text="site", 
-    category_orders={"Mois": MOIS}, 
+    category_orders={"Mois": MOIS, "site": ordre_sites}, 
     color_discrete_map=COULEURS,
     labels={"site": "Site", "kWh": "Production (kWh)"}
 )
@@ -282,7 +288,7 @@ st.divider()
 # ---------------------------------------------------------------- 3. Graphique : Performance spécifique
 st.subheader("🎯 Performance spécifique par site")
 
-perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
+perf = perf_par_site(dfy)
 moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
 
 fig_perf = px.bar(
@@ -291,6 +297,7 @@ fig_perf = px.bar(
     y="kwh_kwc_j", 
     color="site", 
     text="site",
+    category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
     labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""}
 )
@@ -298,7 +305,7 @@ fig_perf.add_hline(y=moyenne, line_dash="dash", line_color="gray", annotation_te
 fig_perf.update_traces(texttemplate='%{text}', textposition='outside')
 fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site.")
+st.caption("Production moyenne par jour et par kWc installé. (Les sites restent triés par ordre de production totale pour faciliter la lecture).")
 
 st.divider()
 
@@ -327,7 +334,7 @@ fig_rem = px.bar(
     color="site",
     barmode="group",
     text="site",
-    category_orders={"Mois": MOIS},
+    category_orders={"Mois": MOIS, "site": ordre_sites},
     color_discrete_map=COULEURS,
     labels={"site": "Site", "Rémunération (€)": "Revenus (€)"}
 )
@@ -341,13 +348,13 @@ st.divider()
 # ---------------------------------------------------------------- 5. Graphique : Production totale YTD
 st.subheader("📈 Production totale par site depuis le début de l'année")
 
-df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 fig_ytd = px.bar(
-    df_ytd, 
+    df_ytd_global, 
     x="site", 
     y="kwh_produits", 
     color="site", 
     text="site",
+    category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
     labels={"kwh_produits": "Production totale (kWh)", "site": ""}
 )
