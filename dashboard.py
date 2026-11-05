@@ -46,10 +46,9 @@ def perf_par_site(d):
 # =====================================================================
 # FONCTIONS DE RÉCUPÉRATION EN DIRECT (API FUSIONSOLAR)
 # =====================================================================
-FS_USER = st.secrets.get("FUSIONSOLAR_USER", os.getenv("FUSIONSOLAR_USER"))
-FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD"))
-FS_URL = st.secrets.get("FUSIONSOLAR_URL", os.getenv("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")).rstrip("/")
-
+FS_USER = st.secrets.get("FUSIONSOLAR_USER")
+FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD")
+FS_URL = "https://uni005eu5.fusionsolar.huawei.com"
 
 @st.cache_data(ttl=600)
 def get_courbe_horaire(target_date: date):
