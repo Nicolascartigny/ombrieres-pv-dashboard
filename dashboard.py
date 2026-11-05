@@ -246,7 +246,7 @@ if df_direct is not None and not df_direct.empty:
         hovermode="x unified"
     )
     st.plotly_chart(fig_direct, width="stretch")
-    st.caption("Données actualisées toutes les 10 minutes (Appuyez sur 'R' ou actualisez la page pour forcer la mise à jour).")
+    st.caption("Données horaires (API Huawei). Un délai de 1 à 2 heures est normal pour la consolidation des KPI de la centrale.")
 else:
     msg = direct_err or "Vérifiez vos identifiants dans les secrets Streamlit."
     st.info(f"Les données horaires en direct sont indisponibles pour le moment. {msg}")
