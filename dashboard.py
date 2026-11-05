@@ -172,6 +172,7 @@ OBJECTIFS_PAR_SITE = {
     "Complexe Sportif (SEV)": 105,
     "La Jumellière (CEA)": 290,
     "Pôle Santé (ODA)": 198
+    "Déchèterie St Germain": 22.5,
 }
 
 with st.sidebar:
