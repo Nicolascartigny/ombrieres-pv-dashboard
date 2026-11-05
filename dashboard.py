@@ -56,11 +56,31 @@ def get_courbe_horaire(target_date: date):
     if not FS_USER or not FS_PASS:
         return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets."
 
-    client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
-    if not client.login():
-        return pd.DataFrame(), f"Échec de connexion API sur {FS_URL}."
-
+    # 1. TEST DE DIAGNOSTIC POUR AFFICHER L'ERREUR HUAWEI EXACTE
+    session = requests.Session()
     try:
+        login_resp = session.post(
+            f"{FS_URL}/thirdData/login",
+            json={"userName": FS_USER, "systemCode": FS_PASS},
+            timeout=15
+        )
+        login_data = login_resp.json()
+        
+        if not login_data.get("success"):
+            err_msg = str(login_data).lower()
+            if "user" in err_msg or "password" in err_msg or login_data.get("failCode") in [20002, 401]:
+                return pd.DataFrame(), f"Identifiants API rejetés. Tu utilises tes identifiants web au lieu du SystemCode de l'API. (Retour Huawei : {login_data})"
+            
+            if "ip" in err_msg or login_data.get("failCode") in [20005, 20011, 403]:
+                return pd.DataFrame(), f"Blocage IP. JRC Solaire a restreint l'accès API à une adresse IP spécifique. Demande-leur d'autoriser toutes les IP. (Retour Huawei : {login_data})"
+            
+            return pd.DataFrame(), f"Connexion refusée par Huawei. (Retour complet : {login_data})"
+            
+        # 2. Si le test passe, on utilise le client normal
+        client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
+        if not client.login():
+            return pd.DataFrame(), f"Échec de connexion API sur {FS_URL}."
+
         stations = client.get_stations()
         stations_map = {}
         for s in stations:
