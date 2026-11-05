@@ -2,17 +2,20 @@
 import os
 import sqlite3
 from contextlib import closing
-from datetime import date
+from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 from config import (DB_PATH, OBJECTIF_ANNUEL_KWH, PUISSANCE_ANNONCEE_KWC,
                     SITES_REF, TOTAL_KWC)
 from collect_data import FusionSolarClient, match_site
 
+TZ = ZoneInfo("Europe/Paris")
 MOIS = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin",
         "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."]
 COULEURS = dict(zip([s["nom"] for s in SITES_REF.values()], px.colors.qualitative.Set2))
@@ -40,74 +43,91 @@ def perf_par_site(d):
 
 
 # =====================================================================
-# FONCTIONS DE RÉCUPÉRATION EN DIRECT (API FUSIONSOLAR)
+# FONCTIONS DE RÉCUPÉRATION EN DIRECT (API FUSIONSOLAR - CODE INTÉGRÉ)
 # =====================================================================
-fs_user = st.secrets.get("FUSIONSOLAR_USER", os.getenv("FUSIONSOLAR_USER"))
-fs_pass = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD"))
-fs_url = st.secrets.get("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")
+FS_USER = st.secrets.get("FUSIONSOLAR_USER", os.getenv("FUSIONSOLAR_USER"))
+FS_PASS = st.secrets.get("FUSIONSOLAR_PASSWORD", os.getenv("FUSIONSOLAR_PASSWORD"))
+FS_URL = st.secrets.get("FUSIONSOLAR_URL", "https://eu5.fusionsolar.huawei.com")
 
 @st.cache_data(ttl=600)
-def get_courbes_du_jour():
-    """Interroge FusionSolar pour récupérer la puissance heure par heure de la journée en cours."""
-    if not fs_user or not fs_pass:
-        return pd.DataFrame()
-        
-    client = FusionSolarClient(fs_url, fs_user, fs_pass)
-    if not client.login():
-        return pd.DataFrame()
-        
-    stations = client.get_stations()
-    mapping = {}
-    for s in stations:
-        code = s.get("plantCode") or s.get("stationCode")
-        nom = s.get("plantName") or s.get("stationName")
-        key = match_site(nom)
-        if key and code:
-            mapping[code] = SITES_REF[key]["nom"]
-            
-    if not mapping:
-        return pd.DataFrame()
-        
-    aujourdhui = date.today()
-    try:
-        data_brute = client.get_hourly_kpi(list(mapping.keys()), aujourdhui)
-    except Exception as e:
-        st.error(f"Erreur lors de l'appel getKpiStationHour : {e}")
+def get_courbe_horaire(target_date: date):
+    """Interroge l'API FusionSolar pour récupérer la puissance heure par heure à la date choisie."""
+    if not FS_USER or not FS_PASS:
         return pd.DataFrame()
     
-    if not data_brute:
-        return pd.DataFrame()
-
-    lignes = []
-    for item in data_brute:
-        code = item.get("stationCode") or item.get("plantCode")
-        if code not in mapping:
-            continue
+    session = requests.Session()
+    try:
+        # 1. Connexion / Login
+        login_resp = session.post(
+            f"{FS_URL}/thirdData/login",
+            json={"userName": FS_USER, "systemCode": FS_PASS},
+            timeout=10
+        )
+        data_login = login_resp.json()
+        token = login_resp.headers.get("xsrf-token") or login_resp.headers.get("X-SRX-TOKEN") or session.cookies.get("XSRF-TOKEN")
+        
+        if not token and data_login.get("success"):
+            # Récupération alternative du token via les en-têtes ou cookies si besoin
+            token = login_resp.headers.get("xsrf-token")
             
-        temps = pd.to_datetime(item.get("collectTime"), unit="ms", utc=True).tz_convert("Europe/Paris")
-        map_data = item.get("dataItemMap", {})
+        if not token:
+            return pd.DataFrame()
+
+        # Récupération dynamique des codes stations depuis la configuration des sites
+        # On tente de lister les stations via l'utilitaire client existant pour mapper les codes
+        client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
+        if not client.login():
+            return pd.DataFrame()
         
-        puissance = map_data.get("inverter_power") or map_data.get("active_power") or 0.0
-        
-        lignes.append({
-            "Site": mapping[code],
-            "Heure": temps,
-            "Puissance (kW)": float(puissance)
-        })
-        
-    return pd.DataFrame(lignes)
+        stations = client.get_stations()
+        STATIONS_MAP = {}
+        for s in stations:
+            code = s.get("plantCode") or s.get("stationCode")
+            nom = s.get("plantName") or s.get("stationName")
+            key = match_site(nom)
+            if key and code:
+                STATIONS_MAP[code] = SITES_REF[key]["nom"]
+
+        if not STATIONS_MAP:
+            return pd.DataFrame()
+
+        # 2. Récupération des données horaires
+        ts = datetime(target_date.year, target_date.month, target_date.day, 12, tzinfo=TZ)
+        collect_time_ms = int(ts.timestamp() * 1000)
+        station_codes = list(STATIONS_MAP.keys())
+
+        kpi_resp = session.post(
+            f"{FS_URL}/thirdData/getKpiStationHour",
+            headers={"X-SRX-TOKEN": token, "xsrf-token": token if token else ""},
+            json={"stationCodes": ",".join(station_codes), "collectTime": collect_time_ms},
+            timeout=10
+        )
+        data = kpi_resp.json().get("data", [])
+        lignes = []
+        for item in data:
+            code = item.get("stationCode") or item.get("plantCode")
+            site_nom = STATIONS_MAP.get(code, code)
+            data_map = item.get("dataItemMap", {})
+            collect_dt = datetime.fromtimestamp(item.get("collectTime", 0) / 1000, tz=TZ)
+            puissance = data_map.get("inverter_power", 0) or data_map.get("active_power", 0) or 0.0
+            lignes.append({
+                "site": site_nom,
+                "heure": collect_dt.strftime("%H:%M"),
+                "puissance_kw": float(puissance)
+            })
+        return pd.DataFrame(lignes)
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def get_alarmes_actives():
     """Récupère les alarmes/défauts actifs en temps réel sur les centrales."""
-    if not fs_user or not fs_pass:
+    if not FS_USER or not FS_PASS:
         return []
-        
-    client = FusionSolarClient(fs_url, fs_user, fs_pass)
+    client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
     if not client.login():
         return []
-        
     try:
         response = client._post("getAlarmList", {"status": 1})
         return response.get("data", [])
@@ -187,21 +207,21 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique en Direct (Plotly)
+# ---------------------------------------------------------------- Graphique en Direct (Utilisant get_courbe_horaire)
 st.subheader("⚡ Puissance en direct (Aujourd'hui)")
 
 with st.spinner("Récupération des données en temps réel depuis FusionSolar..."):
-    df_direct = get_courbes_du_jour()
+    df_direct = get_courbe_horaire(date.today())
 
 if not df_direct.empty:
     fig_direct = px.line(
         df_direct,
-        x="Heure",
-        y="Puissance (kW)",
-        color="Site",
+        x="heure",
+        y="puissance_kw",
+        color="site",
         color_discrete_map=COULEURS,
         markers=True,
-        labels={"Puissance (kW)": "Puissance (kW)", "Heure": ""}
+        labels={"puissance_kw": "Puissance (kW)", "heure": ""}
     )
     fig_direct.update_traces(line=dict(width=2.5), marker=dict(size=5))
     fig_direct.update_layout(
@@ -234,55 +254,4 @@ df_rem["Tarif (€/MWh)"] = df_rem["site"].map(lambda s: TARIFS.get(s, 95.0))
 df_rem["Rémunération (€)"] = df_rem["MWh"] * df_rem["Tarif (€/MWh)"]
 
 fig_rem = px.bar(df_rem, x="Mois", y="Rémunération (€)", color="site", barmode="group",
-                 text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
-                 labels={"site": "Site", "Rémunération (€)": "Revenus (€)"})
-fig_rem.update_traces(texttemplate='%{text}', textposition='outside')
-fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
-st.plotly_chart(fig_rem, width="stretch")
-
-# ---------------------------------------------------------------- Graphiques 2 et 3
-g2, g3 = st.columns(2)
-
-with g2:
-    st.subheader("Performance spécifique par site")
-    perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
-    moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
-    fig2 = px.bar(perf, x="site", y="kwh_kwc_j", color="site", text="site",
-                  color_discrete_map=COULEURS,
-                  labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""})
-    fig2.add_hline(y=moyenne, line_dash="dash", line_color="gray",
-                   annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
-    fig2.update_traces(texttemplate='%{text}', textposition='outside')
-    fig2.update_layout(showlegend=False, margin=dict(t=30, b=10))
-    st.plotly_chart(fig2, width="stretch")
-    st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site : compare les sites indépendamment de leur taille et de leur date de mise en service.")
-
-with g3:
-    st.subheader("Production mensuelle par site (kWh)")
-    mensuel = (dfy.assign(mois=dfy["date"].dt.month)
-                  .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-    mensuel["kWh"] = mensuel["kwh_produits"]
-    mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
-    
-    fig3 = px.bar(mensuel, x="Mois", y="kWh", color="site", barmode="group",
-                  text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
-                  labels={"site": "Site", "kWh": "Production (kWh)"})
-    fig3.update_traces(texttemplate='%{text}', textposition='outside')
-    fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
-    st.plotly_chart(fig3, width="stretch")
-
-# ---------------------------------------------------------------- Graphique 4 : Production totale depuis le début de l'année
-st.subheader("📈 Production totale par site depuis le début de l'année")
-df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
-
-fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
-                 color_discrete_map=COULEURS,
-                 labels={"kwh_produits": "Production totale (kWh)", "site": ""})
-fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
-fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
-st.plotly_chart(fig_ytd, width="stretch")
-
-with st.expander("Données journalières récentes"):
-    recent = dfy.sort_values(["date", "site"], ascending=[False, True])
-    st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
-                 width="stretch", hide_index=True)
+                 text="site", category_orders={"Mois": MOIS}, color_discrete_map=
