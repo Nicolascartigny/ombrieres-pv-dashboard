@@ -18,6 +18,7 @@ SITES_REF = {
     "MAUGES_COM":       {"nom": "Mauges Communauté (MC)",   "kwc": 127, "aliases": ["mauges communaute", "mc"]},
     "LA_LOGE":          {"nom": "La Loge (BEM)",            "kwc": 127, "aliases": ["la loge", "bem"]},
     "COMPLEXE_SPORTIF": {"nom": "Complexe Sportif (SEV)",   "kwc": 97,  "aliases": ["complexe sportif", "sev"]},
+    "Déchèterie St Germain": {"nom": "Déchèterie St Germain", "kwc": 22},
 }
 TOTAL_KWC = sum(s["kwc"] for s in SITES_REF.values())
 
