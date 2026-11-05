@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 
 from config import (DB_PATH, OBJECTIF_ANNUEL_KWH, PUISSANCE_ANNONCEE_KWC,
@@ -57,70 +56,35 @@ def get_courbe_horaire(target_date: date):
     if not FS_USER or not FS_PASS:
         return pd.DataFrame(), "Identifiants FusionSolar introuvables dans les secrets."
 
-    session = requests.Session()
+    client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
+    if not client.login():
+        return pd.DataFrame(), f"Échec de connexion API sur {FS_URL}."
+
     try:
-        login_resp = session.post(
-            f"{FS_URL}/thirdData/login",
-            json={"userName": FS_USER, "systemCode": FS_PASS},
-            timeout=15
-        )
-        login_data = login_resp.json()
-        
-        # Ligne découpée pour éviter les erreurs de copier-coller
-        if not (
-            login_resp.ok 
-            and login_data.get("success") 
-            and login_data.get("failCode", 0) == 0
-        ):
-            return pd.DataFrame(), f"Échec d'authentification sur {FS_URL} : {login_data}"
-
-        token = (login_resp.headers.get("xsrf-token") or login_resp.headers.get("X-SRX-TOKEN")
-                 or session.cookies.get("XSRF-TOKEN"))
-
-        client = FusionSolarClient(FS_URL, FS_USER, FS_PASS)
-        if not client.login():
-            return pd.DataFrame(), "Échec du login via le client FusionSolar."
-
         stations = client.get_stations()
-        STATIONS_MAP = {}
+        stations_map = {}
         for s in stations:
             code = s.get("plantCode") or s.get("stationCode")
             nom = s.get("plantName") or s.get("stationName") or ""
             key = match_site(nom)
             if key and code:
-                STATIONS_MAP[code] = SITES_REF[key]["nom"]
+                stations_map[code] = SITES_REF[key]["nom"]
 
-        if not STATIONS_MAP:
-            return pd.DataFrame(), f"Aucune centrale reconnue. Noms trouvés : {[s.get('plantName') or s.get('stationName') for s in stations]}"
+        if not stations_map:
+            noms = [s.get("plantName") or s.get("stationName") for s in stations]
+            return pd.DataFrame(), f"Aucune centrale reconnue. Noms trouvés : {noms}"
 
-        ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
-        collect_time_ms = int(ts.timestamp() * 1000)
-        station_codes = list(STATIONS_MAP.keys())
-
-        headers = {}
-        if token:
-            headers["X-SRX-TOKEN"] = token
-            headers["XSRF-TOKEN"] = token
-
-        kpi_resp = session.post(
-            f"{FS_URL}/thirdData/getKpiStationHour",
-            headers=headers,
-            json={"stationCodes": ",".join(station_codes), "collectTime": collect_time_ms},
-            timeout=15
-        )
-        kpi_data = kpi_resp.json()
-        data = kpi_data.get("data") or []
-
+        data = client.get_hourly_kpi(list(stations_map.keys()), target_date)
         if not data:
-            return pd.DataFrame(), f"API connectée mais aucune donnée horaire renvoyée (retour : {kpi_data})"
+            return pd.DataFrame(), "Aucune mesure horaire disponible pour aujourd'hui."
 
         lignes = []
         for item in data:
             code = item.get("stationCode") or item.get("plantCode")
-            site_nom = STATIONS_MAP.get(code, code)
+            site_nom = stations_map.get(code, code)
             data_map = item.get("dataItemMap", {})
             collect_dt = datetime.fromtimestamp(item.get("collectTime", 0) / 1000, tz=TZ)
-            puissance = data_map.get("inverter_power", 0) or data_map.get("active_power", 0) or 0.0
+            puissance = data_map.get("inverter_power") or data_map.get("active_power") or 0.0
             lignes.append({
                 "site": site_nom,
                 "heure": collect_dt.strftime("%H:%M"),
@@ -129,7 +93,7 @@ def get_courbe_horaire(target_date: date):
 
         return pd.DataFrame(lignes), None
     except Exception as e:
-        return pd.DataFrame(), f"Erreur de communication : {e}"
+        return pd.DataFrame(), f"Erreur lors de la récupération : {e}"
 
 
 @st.cache_data(ttl=300)
@@ -141,8 +105,8 @@ def get_alarmes_actives():
     if not client.login():
         return []
     try:
-        response = client._post("getAlarmList", {"status": 1})
-        return response.get("data", [])
+        response = client.get_active_alarms()
+        return response if isinstance(response, list) else []
     except Exception:
         return []
 
