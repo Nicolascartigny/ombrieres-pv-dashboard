@@ -109,7 +109,7 @@ def get_courbe_horaire(target_date: date):
         if not stations_map:
             return pd.DataFrame(), "Aucune centrale reconnue dans votre compte FusionSolar."
 
-        # 3. Récupération des données horaires (Seul point d'entrée historique autorisé)
+        # 3. Récupération des données horaires
         ts = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=TZ)
         collect_time_ms = int(ts.timestamp() * 1000)
 
@@ -222,7 +222,7 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique en Direct
+# ---------------------------------------------------------------- 1. Graphique en Direct
 st.subheader("⚡ Puissance en direct (Aujourd'hui)")
 
 with st.spinner("Récupération des données en temps réel depuis FusionSolar..."):
@@ -252,7 +252,58 @@ else:
 
 st.divider()
 
-# ---------------------------------------------------------------- Graphique 1 : Rémunération mensuelle estimée
+
+# ---------------------------------------------------------------- 2. Graphique : Production mensuelle
+st.subheader("📊 Production mensuelle par site")
+
+mensuel = (dfy.assign(mois=dfy["date"].dt.month)
+              .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
+mensuel["kWh"] = mensuel["kwh_produits"]
+mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
+
+fig_mensuel = px.bar(
+    mensuel, 
+    x="Mois", 
+    y="kWh", 
+    color="site", 
+    barmode="group",
+    text="site", 
+    category_orders={"Mois": MOIS}, 
+    color_discrete_map=COULEURS,
+    labels={"site": "Site", "kWh": "Production (kWh)"}
+)
+fig_mensuel.update_traces(texttemplate='%{text}', textposition='outside')
+fig_mensuel.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
+st.plotly_chart(fig_mensuel, width="stretch")
+
+st.divider()
+
+
+# ---------------------------------------------------------------- 3. Graphique : Performance spécifique
+st.subheader("🎯 Performance spécifique par site")
+
+perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
+moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
+
+fig_perf = px.bar(
+    perf, 
+    x="site", 
+    y="kwh_kwc_j", 
+    color="site", 
+    text="site",
+    color_discrete_map=COULEURS,
+    labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""}
+)
+fig_perf.add_hline(y=moyenne, line_dash="dash", line_color="gray", annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
+fig_perf.update_traces(texttemplate='%{text}', textposition='outside')
+fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_perf, width="stretch")
+st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site.")
+
+st.divider()
+
+
+# ---------------------------------------------------------------- 4. Graphique : Rémunération mensuelle estimée
 st.subheader("💶 Rémunération mensuelle estimée")
 
 df_rem = (dfy.assign(mois=dfy["date"].dt.month)
@@ -284,48 +335,29 @@ fig_rem.update_traces(texttemplate='%{text}', textposition='outside')
 fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
 st.plotly_chart(fig_rem, width="stretch")
 
-# ---------------------------------------------------------------- Graphiques 2 et 3
-g2, g3 = st.columns(2)
+st.divider()
 
-with g2:
-    st.subheader("Performance spécifique par site")
-    perf = perf_par_site(dfy).sort_values("kwh_kwc_j", ascending=False)
-    moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
-    fig2 = px.bar(perf, x="site", y="kwh_kwc_j", color="site", text="site",
-                  color_discrete_map=COULEURS,
-                  labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""})
-    fig2.add_hline(y=moyenne, line_dash="dash", line_color="gray",
-                   annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
-    fig2.update_traces(texttemplate='%{text}', textposition='outside')
-    fig2.update_layout(showlegend=False, margin=dict(t=30, b=10))
-    st.plotly_chart(fig2, width="stretch")
-    st.caption("Production moyenne par jour et par kWc installé, sur les jours de production de chaque site.")
 
-with g3:
-    st.subheader("Production mensuelle par site (kWh)")
-    mensuel = (dfy.assign(mois=dfy["date"].dt.month)
-                  .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-    mensuel["kWh"] = mensuel["kwh_produits"]
-    mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
-
-    fig3 = px.bar(mensuel, x="Mois", y="kWh", color="site", barmode="group",
-                  text="site", category_orders={"Mois": MOIS}, color_discrete_map=COULEURS,
-                  labels={"site": "Site", "kWh": "Production (kWh)"})
-    fig3.update_traces(texttemplate='%{text}', textposition='outside')
-    fig3.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
-    st.plotly_chart(fig3, width="stretch")
-
-# ---------------------------------------------------------------- Graphique 4 : Production totale depuis le début de l'année
+# ---------------------------------------------------------------- 5. Graphique : Production totale YTD
 st.subheader("📈 Production totale par site depuis le début de l'année")
-df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 
-fig_ytd = px.bar(df_ytd, x="site", y="kwh_produits", color="site", text="site",
-                 color_discrete_map=COULEURS,
-                 labels={"kwh_produits": "Production totale (kWh)", "site": ""})
+df_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+fig_ytd = px.bar(
+    df_ytd, 
+    x="site", 
+    y="kwh_produits", 
+    color="site", 
+    text="site",
+    color_discrete_map=COULEURS,
+    labels={"kwh_produits": "Production totale (kWh)", "site": ""}
+)
 fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
 fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_ytd, width="stretch")
 
+st.divider()
+
+# ---------------------------------------------------------------- Tableau des données
 with st.expander("Données journalières récentes"):
     recent = dfy.sort_values(["date", "site"], ascending=[False, True])
     st.dataframe(recent[["date", "site", "kwh_produits", "ratio_kwh_kwc", "source"]].head(120),
