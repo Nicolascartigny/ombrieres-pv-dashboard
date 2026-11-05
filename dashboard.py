@@ -78,14 +78,24 @@ def get_courbe_horaire(target_date: date):
             raw_text = login_resp.text[:250].replace('\n', ' ')
             return pd.DataFrame(), f"Le serveur a renvoyé du texte/HTML au lieu de JSON : {raw_text}"
 
-        token = login_resp.headers.get("X-SRX-TOKEN")
-        if not token or not login_data.get("success"):
+        # Extraction robuste du token (Huawei utilise différentes casses selon les serveurs)
+        token = (login_resp.headers.get("xsrf-token") or 
+                 login_resp.headers.get("X-SRX-TOKEN") or 
+                 session.cookies.get("XSRF-TOKEN"))
+
+        if not login_data.get("success"):
             return pd.DataFrame(), f"Connexion refusée par Huawei. (Retour : {login_data})"
+            
+        if not token:
+            return pd.DataFrame(), f"Login réussi mais jeton introuvable. (En-têtes reçus : {dict(login_resp.headers)})"
+
+        # On injecte le token sous ses deux formes pour les requêtes suivantes
+        auth_headers = {**headers, "X-SRX-TOKEN": token, "xsrf-token": token}
 
         # 2. Récupération de la liste des centrales pour faire la correspondance
         dev_resp = session.post(
             f"{FS_URL}/thirdData/getStationList",
-            headers={**headers, "X-SRX-TOKEN": token},
+            headers=auth_headers,
             json={},
             timeout=15
         )
@@ -107,7 +117,7 @@ def get_courbe_horaire(target_date: date):
 
         kpi_resp = session.post(
             f"{FS_URL}/thirdData/getKpiStationHour",
-            headers={**headers, "X-SRX-TOKEN": token},
+            headers=auth_headers,
             json={"stationCodes": ",".join(stations_map.keys()), "collectTime": collect_time_ms},
             timeout=15
         )
@@ -134,7 +144,6 @@ def get_courbe_horaire(target_date: date):
 
     except Exception as e:
         return pd.DataFrame(), f"Erreur de communication : {e}"
-
 
 @st.cache_data(ttl=300)
 def get_alarmes_actives():
