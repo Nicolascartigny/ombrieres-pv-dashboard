@@ -64,7 +64,13 @@ def get_courbe_horaire(target_date: date):
             json={"userName": FS_USER, "systemCode": FS_PASS},
             timeout=15
         )
-        login_data = login_resp.json()
+        
+        # Interception de l'erreur HTML (Expecting value)
+        try:
+            login_data = login_resp.json()
+        except ValueError:
+            raw_text = login_resp.text[:250].replace('\n', ' ')
+            return pd.DataFrame(), f"Mauvaise URL API. Le serveur a renvoyé une page web (Erreur 404/Redirection) au lieu de données : {raw_text}"
         
         if not login_data.get("success"):
             err_msg = str(login_data).lower()
