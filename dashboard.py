@@ -176,18 +176,34 @@ OBJECTIFS_PAR_SITE = {
 }
 
 with st.sidebar:
+    st.subheader("Filtres")
     annees = sorted(df["date"].dt.year.unique(), reverse=True)
     annee = st.selectbox("Année", annees)
+    
+    st.divider()
+    
+    # NOUVEAU : Liste des sites cliquable
+    liste_sites = ["Tous les sites"] + sorted(df["site"].unique().tolist())
+    site_choisi = st.radio("Centrale photovoltaïque", liste_sites)
+    
+    st.divider()
+    
     if st.button("Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()
 
+# --- FILTRAGE DYNAMIQUE (LE COEUR DE LA FONCTIONNALITÉ) ---
+# Si un site précis est cliqué, on ampute tout le reste de la base de données
+if site_choisi != "Tous les sites":
+    df = df[df["site"] == site_choisi]
+
+# Tout le reste du code s'adapte maintenant à la sélection (globale ou site unique)
 dfy = df[df["date"].dt.year == annee]
 sites_actifs = dfy["site"].unique()
 objectif_annuel_mwh = sum(OBJECTIFS_PAR_SITE.get(site, 0) for site in sites_actifs)
 OBJECTIF_ANNUEL_KWH = objectif_annuel_mwh * 1000
 
-# --- CALCUL DE L'ORDRE DYNAMIQUE DES SITES (Du plus productif au moins productif) ---
+# --- CALCUL DE L'ORDRE DYNAMIQUE DES SITES ---
 df_ytd_global = dfy.groupby("site", as_index=False)["kwh_produits"].sum().sort_values("kwh_produits", ascending=False)
 ordre_sites = df_ytd_global["site"].tolist()
 # ------------------------------------------------------------------------------------
