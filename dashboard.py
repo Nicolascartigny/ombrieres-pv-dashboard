@@ -297,21 +297,31 @@ st.subheader("🎯 Tendance annuelle de production (Extrapolée)")
 
 perf = perf_par_site(dfy)
 
+# Création d'un libellé enrichi avec le nombre de jours d'exploitation pour l'axe X (avec un retour à la ligne HTML <br>)
+perf["site_label"] = perf.apply(lambda row: f"{row['site']}<br><i>({row['jours']} jours d'exploitation)</i>", axis=1)
+
 # Calcul du productible annualisé basé sur la moyenne journalière : (kWh / kWc / nb_jours) * 365
 perf["kwh_kwc_an"] = (perf["kwh"] / perf["kwc"]) / perf["jours"] * 365
 
 # Formatage visuel (ex: "1 088 kWh/kWc/an")
 perf["label_visuel"] = perf["kwh_kwc_an"].apply(lambda x: f"{x:,.0f} kWh/kWc/an".replace(",", " "))
 
+# On recrée l'ordre de tri pour qu'il corresponde aux nouveaux libellés enrichis
+ordre_labels = []
+for s in ordre_sites:
+    match = perf[perf["site"] == s]
+    if not match.empty:
+        ordre_labels.append(match.iloc[0]["site_label"])
+
 fig_perf = px.bar(
     perf, 
-    x="site", 
+    x="site_label", 
     y="kwh_kwc_an", 
     color="site", 
     text="label_visuel",
-    category_orders={"site": ordre_sites},
+    category_orders={"site_label": ordre_labels},
     color_discrete_map=COULEURS,
-    labels={"kwh_kwc_an": "Productible extrapolé (kWh/kWc/an)", "site": ""}
+    labels={"kwh_kwc_an": "Productible extrapolé (kWh/kWc/an)", "site_label": ""}
 )
 
 # Ligne d'objectif P75 du Business Plan
@@ -335,7 +345,7 @@ max_y = max(1200, perf["kwh_kwc_an"].max() * 1.1)
 fig_perf.update_layout(yaxis_range=[0, max_y], showlegend=False, margin=dict(t=30, b=10))
 
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Productible annuel extrapolé (Moyenne journalière actuelle x 365 jours) comparé à l'objectif P75.")
+st.caption("Productible annuel extrapolé (Moyenne journalière x 365 jours). Le nombre de jours d'exploitation sous chaque site permet de contextualiser les écarts de tendance liés aux dates de raccordement.")
 
 st.divider()
 
