@@ -318,6 +318,37 @@ if df_direct is not None and not df_direct.empty:
         markers=True,
         labels={"puissance_kw": "Puissance (kW)", "heure": ""}
     )
+  if df_direct is not None and not df_direct.empty:
+    
+    # NOUVEAU : On masque les autres courbes si un site est sélectionné
+    if site_choisi != "Tous les sites":
+        df_direct = df_direct[df_direct["site"] == site_choisi]
+
+    # On vérifie qu'il reste bien des données après le filtre
+    if not df_direct.empty:
+        fig_direct = px.line(
+            df_direct,
+            x="heure",
+            y="puissance_kw",
+            color="site",
+            category_orders={"site": ordre_sites},
+            color_discrete_map=COULEURS,
+            markers=True,
+            labels={"puissance_kw": "Puissance (kW)", "heure": ""}
+        )
+        fig_direct.update_traces(line=dict(width=2.5), marker=dict(size=5))
+        fig_direct.update_layout(
+            margin=dict(t=30, b=10),
+            legend=dict(orientation="h", y=-0.25, title=None),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig_direct, width="stretch")
+        st.caption("Données horaires de l'API. Un délai de consolidation de 1 à 2 heures est normal du côté de Huawei.")
+    else:
+        st.info(f"Le site '{site_choisi}' n'a pas encore transmis de données aujourd'hui.")
+else:
+    msg = direct_err or "Vérifiez vos identifiants dans les secrets Streamlit."
+    st.info(f"Les données horaires en direct sont indisponibles pour le moment. {msg}")
     fig_direct.update_traces(line=dict(width=2.5), marker=dict(size=5))
     fig_direct.update_layout(
         margin=dict(t=30, b=10),
