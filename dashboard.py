@@ -286,34 +286,37 @@ st.plotly_chart(fig_mensuel, width="stretch")
 st.divider()
 
 
-# ---------------------------------------------------------------- 3. Graphique : Performance spécifique
-st.subheader("🎯 Performance spécifique par site")
+# ---------------------------------------------------------------- 3. Graphique : Production moyenne journalière
+st.subheader("🎯 Production moyenne journalière")
 
 perf = perf_par_site(dfy)
-# Calcul de la moyenne de performance cumulée
-moyenne_perf = perf["kwh"].sum() / perf["kwc"].sum()
+# Calcul du volume moyen produit par jour (en kWh)
+perf["kwh_jour"] = perf["kwh"] / perf["jours"]
+
+# Moyenne globale de ces productions journalières pour la ligne de repère
+moyenne_parc = perf["kwh_jour"].mean()
 
 fig_perf = px.bar(
     perf, 
     x="site", 
-    y="kwh_kwc", # On utilise le cumulé (ex: 860) plutôt que le journalier
+    y="kwh_jour", 
     color="site", 
-    text="kwh_kwc", # On cible la valeur numérique pour l'affichage
+    text="kwh_jour",
     category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"kwh_kwc": "Performance (kWh/kWc)", "site": ""}
+    labels={"kwh_jour": "Production (kWh/jour)", "site": ""}
 )
 
 fig_perf.add_hline(
-    y=moyenne_perf, 
+    y=moyenne_parc, 
     line_dash="dash", 
     line_color="gray", 
-    annotation_text=f"Moyenne : {fmt(moyenne_perf, 0)} kWh/kWc"
+    annotation_text=f"Moyenne : {fmt(moyenne_parc, 0)} kWh/j"
 )
 
-# Formatage : arrondi à l'entier (.0f), ajout de l'unité, placé à l'intérieur en blanc et en gras
+# Formatage visuel : arrondi à l'entier, ajout de l'unité, texte blanc en gras au centre
 fig_perf.update_traces(
-    texttemplate='<b>%{text:.0f} kWh/kWc</b>', 
+    texttemplate='<b>%{text:.0f} kWh/j</b>', 
     textposition='inside', 
     insidetextanchor='middle',
     textfont_color='white'
@@ -321,10 +324,9 @@ fig_perf.update_traces(
 
 fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Production totale cumulée par kWc installé (Rendement spécifique).")
+st.caption("Volume d'énergie moyen produit par jour depuis la connexion au réseau (Total kWh divisé par le nombre de jours).")
 
 st.divider()
-
 
 # ---------------------------------------------------------------- 4. Graphique : Rémunération mensuelle estimée
 st.subheader("💶 Rémunération mensuelle estimée")
