@@ -458,42 +458,63 @@ st.plotly_chart(fig_rem_mois, width="stretch")
 
 st.divider()
 
-# ---------------------------------------------------------------- 5. Graphique : Rémunération totale YTD
-st.subheader("💶 Rémunération totale depuis le début de l'année")
+# ---------------------------------------------------------------- 5. Graphique : Rémunération mensuelle et cumulée
+st.subheader("💶 Rémunération mensuelle et totale depuis le début de l'année")
 
-df_rem_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
-df_rem_ytd["MWh"] = df_rem_ytd["kwh_produits"] / 1000
+# Regroupement par mois et par site
+df_rem = dfy.copy()
+df_rem["mois_idx"] = df_rem["date"].dt.month
 
-df_rem_ytd["Tarif (€/MWh)"] = df_rem_ytd["site"].map(lambda s: TARIFS.get(s, 95.0))
-df_rem_ytd["Revenus (€)"] = df_rem_ytd["MWh"] * df_rem_ytd["Tarif (€/MWh)"]
-df_rem_ytd["Revenus (k€)"] = df_rem_ytd["Revenus (€)"] / 1000
+df_rem_mensuel = df_rem.groupby(["mois_idx", "site"], as_index=False)["kwh_produits"].sum()
+df_rem_mensuel["MWh"] = df_rem_mensuel["kwh_produits"] / 1000
 
-# Formatage visuel (ex: "6,2 k€")
-df_rem_ytd["label_visuel"] = df_rem_ytd["Revenus (k€)"].apply(lambda x: f"{x:,.1f} k€".replace(".", ","))
+# Application des tarifs
+TARIFS = {
+    "Les Minières (MSE)": 95.0,
+    "Mauges Communauté (MC)": 95.0,
+    "La Loge (BEM)": 95.0,
+    "Complexe Sportif (SEV)": 91.2,
+    "Déchèterie St Germain": 95.0
+}
+df_rem_mensuel["Tarif (€/MWh)"] = df_rem_mensuel["site"].map(lambda s: TARIFS.get(s, 95.0))
+df_rem_mensuel["Revenus (€)"] = df_rem_mensuel["MWh"] * df_rem_mensuel["Tarif (€/MWh)"]
 
-fig_rem_ytd = px.bar(
-    df_rem_ytd, 
-    x="site", 
-    y="Revenus (k€)", 
+# Création du nom du mois à partir de la liste MOIS
+df_rem_mensuel["Mois"] = df_rem_mensuel["mois_idx"].apply(lambda x: MOIS[x - 1])
+
+# Formatage visuel (ex: "1 250 €") pour l'intérieur des barres
+df_rem_mensuel["label_visuel"] = df_rem_mensuel["Revenus (€)"].apply(lambda x: f"{x:,.0f} €".replace(",", " "))
+
+fig_rem_mensuel = px.bar(
+    df_rem_mensuel, 
+    x="Mois", 
+    y="Revenus (€)", 
     color="site", 
     text="label_visuel",
-    category_orders={"site": ordre_sites},
+    category_orders={"Mois": MOIS, "site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"Revenus (k€)": "Revenus cumulés YTD (k€)", "site": ""}
+    labels={"Revenus (€)": "Revenus générés (€)", "Mois": ""}
 )
 
-fig_rem_ytd.update_traces(
+fig_rem_mensuel.update_traces(
     texttemplate='<b>%{text}</b>', 
     textposition='inside', 
     insidetextanchor='middle',
     textfont_color='white'
 )
-fig_rem_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
-st.plotly_chart(fig_rem_ytd, width="stretch")
 
-# Calcul et affichage du total global (en euros précis)
-total_revenus = df_rem_ytd["Revenus (€)"].sum()
-st.metric(label="💰 Total généré par l'ensemble du parc", value=f"{total_revenus:,.0f} €".replace(",", " "))
+# On masque la légende si un seul site est sélectionné
+afficher_legende = (site_choisi == "Tous les sites")
+fig_rem_mensuel.update_layout(showlegend=afficher_legende, margin=dict(t=30, b=10))
+st.plotly_chart(fig_rem_mensuel, width="stretch")
+
+# Calcul et affichage du total global en dessous
+total_revenus = df_rem_mensuel["Revenus (€)"].sum()
+titre_total_rev = "💰 Total généré depuis le début de l'année"
+if site_choisi != "Tous les sites":
+    titre_total_rev += f" - {site_choisi}"
+
+st.metric(label=titre_total_rev, value=f"{total_revenus:,.0f} €".replace(",", " "))
 
 st.divider()
 
