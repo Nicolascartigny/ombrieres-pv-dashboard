@@ -176,19 +176,36 @@ OBJECTIFS_PAR_SITE = {
 }
 
 with st.sidebar:
-    st.subheader("Filtres")
+    st.markdown("### 🎛️ Panneau de contrôle")
+    
     annees = sorted(df["date"].dt.year.unique(), reverse=True)
-    annee = st.selectbox("Année", annees)
+    annee = st.selectbox("📅 Année d'analyse", annees)
     
     st.divider()
     
-    # NOUVEAU : Liste des sites cliquable
-    liste_sites = ["Tous les sites"] + sorted(df["site"].unique().tolist())
-    site_choisi = st.radio("Centrale photovoltaïque", liste_sites)
+    st.markdown("### 📍 Périmètre géographique")
     
+    # Création d'une liste stylisée avec des emojis pour le menu
+    sites_bruts = sorted(df["site"].unique().tolist())
+    liste_sites_affiches = ["🌍 Vue globale (Tous les sites)"] + [f"⚡ {s}" for s in sites_bruts]
+    
+    # Le bouton radio stylisé
+    choix_radio = st.radio(
+        label="Sélection du site",
+        options=liste_sites_affiches,
+        label_visibility="collapsed" # Cache le petit texte gris au-dessus pour faire plus propre
+    )
+    
+    # On "traduit" le choix stylisé pour que ton filtre de données fonctionne toujours parfaitement
+    if choix_radio == "🌍 Vue globale (Tous les sites)":
+        site_choisi = "Tous les sites"
+    else:
+        site_choisi = choix_radio.replace("⚡ ", "")
+        
     st.divider()
     
-    if st.button("Rafraîchir les données"):
+    # Un bouton de rafraîchissement large et mis en valeur
+    if st.button("🔄 Rafraîchir les données API", use_container_width=True, type="primary"):
         st.cache_data.clear()
         st.rerun()
 
