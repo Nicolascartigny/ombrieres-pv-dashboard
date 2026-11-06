@@ -357,26 +357,32 @@ else:
     st.info(f"Les données horaires en direct sont indisponibles pour le moment. {msg}")
 
 st.divider()
-# ---------------------------------------------------------------- 2. Graphique : Production totale
-st.subheader("⚡ Production totale depuis la mise en service")
+# ---------------------------------------------------------------- 2. Graphique : Production mensuelle
+st.subheader("⚡ Production mensuelle et cumulée")
 
-prod = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+# On copie et on extrait le mois pour le regroupement
+df_mensuel = dfy.copy()
+df_mensuel["mois_idx"] = df_mensuel["date"].dt.month
 
-# Conversion de kWh vers MWh
-prod["MWh"] = prod["kwh_produits"] / 1000
+# Regroupement par mois et par site (pour garder la bonne couleur)
+prod_mensuelle = df_mensuel.groupby(["mois_idx", "site"], as_index=False)["kwh_produits"].sum()
+prod_mensuelle["MWh"] = prod_mensuelle["kwh_produits"] / 1000
 
-# Formatage visuel (ex: "65,4 MWh")
-prod["label_visuel"] = prod["MWh"].apply(lambda x: f"{x:,.1f} MWh".replace(".", ","))
+# Création du nom du mois à partir de la variable globale MOIS (attention au décalage d'index)
+prod_mensuelle["Mois"] = prod_mensuelle["mois_idx"].apply(lambda x: MOIS[x - 1])
+
+# Formatage visuel (ex: "5,2") : on enlève le texte "MWh" dans les barres pour ne pas surcharger le graphique
+prod_mensuelle["label_visuel"] = prod_mensuelle["MWh"].apply(lambda x: f"{x:,.1f}".replace(".", ","))
 
 fig_prod = px.bar(
-    prod, 
-    x="site", 
+    prod_mensuelle, 
+    x="Mois", 
     y="MWh", 
     color="site", 
     text="label_visuel",
-    category_orders={"site": ordre_sites},
+    category_orders={"Mois": MOIS, "site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"MWh": "Production cumulée (MWh)", "site": ""}
+    labels={"MWh": "Production (MWh)", "Mois": ""}
 )
 
 fig_prod.update_traces(
@@ -385,65 +391,22 @@ fig_prod.update_traces(
     insidetextanchor='middle',
     textfont_color='white'
 )
-fig_prod.update_layout(showlegend=False, margin=dict(t=30, b=10))
+
+# On masque la légende si un seul site est sélectionné (car c'est déjà évident)
+afficher_legende = (site_choisi == "Tous les sites")
+fig_prod.update_layout(showlegend=afficher_legende, margin=dict(t=30, b=10))
 st.plotly_chart(fig_prod, width="stretch")
 
-st.divider()
+# --- Affichage du total en dessous ---
+total_prod_mwh = dfy["kwh_produits"].sum() / 1000
+total_str = f"{total_prod_mwh:,.1f} MWh".replace(",", "X").replace(".", ",").replace("X", " ")
 
-# ---------------------------------------------------------------- 3. Graphique : Productible annuel extrapolé (Run Rate)
-st.subheader("🎯 Tendance annuelle de production (Extrapolée)")
+# On adapte le titre de l'encart selon le filtre choisi
+titre_total = "⚡ Production totale cumulée"
+if site_choisi != "Tous les sites":
+    titre_total += f" - {site_choisi}"
 
-perf = perf_par_site(dfy)
-
-# Création d'un libellé enrichi avec le nombre de jours d'exploitation pour l'axe X (avec un retour à la ligne HTML <br>)
-perf["site_label"] = perf.apply(lambda row: f"{row['site']}<br><i>({row['jours']} jours d'exploitation)</i>", axis=1)
-
-# Calcul du productible annualisé basé sur la moyenne journalière : (kWh / kWc / nb_jours) * 365
-perf["kwh_kwc_an"] = (perf["kwh"] / perf["kwc"]) / perf["jours"] * 365
-
-# Formatage visuel (ex: "1 088 kWh/kWc/an")
-perf["label_visuel"] = perf["kwh_kwc_an"].apply(lambda x: f"{x:,.0f} kWh/kWc/an".replace(",", " "))
-
-# On recrée l'ordre de tri pour qu'il corresponde aux nouveaux libellés enrichis
-ordre_labels = []
-for s in ordre_sites:
-    match = perf[perf["site"] == s]
-    if not match.empty:
-        ordre_labels.append(match.iloc[0]["site_label"])
-
-fig_perf = px.bar(
-    perf, 
-    x="site_label", 
-    y="kwh_kwc_an", 
-    color="site", 
-    text="label_visuel",
-    category_orders={"site_label": ordre_labels},
-    color_discrete_map=COULEURS,
-    labels={"kwh_kwc_an": "Productible extrapolé (kWh/kWc/an)", "site_label": ""}
-)
-
-# Ligne d'objectif P75 du Business Plan
-fig_perf.add_hline(
-    y=1051, 
-    line_dash="dot", 
-    line_color="red", 
-    annotation_text="Objectif BP (P75) : 1 051 kWh/kWc/an",
-    annotation_position="bottom right"
-)
-
-fig_perf.update_traces(
-    texttemplate='<b>%{text}</b>', 
-    textposition='inside', 
-    insidetextanchor='middle',
-    textfont_color='white'
-)
-
-# Ajustement de l'axe Y pour toujours voir la ligne P75 même en cas de faible production hivernale
-max_y = max(1200, perf["kwh_kwc_an"].max() * 1.1)
-fig_perf.update_layout(yaxis_range=[0, max_y], showlegend=False, margin=dict(t=30, b=10))
-
-st.plotly_chart(fig_perf, width="stretch")
-st.caption("Productible annuel extrapolé (Moyenne journalière x 365 jours). Le nombre de jours d'exploitation sous chaque site permet de contextualiser les écarts de tendance liés aux dates de raccordement.")
+st.metric(label=titre_total, value=total_str)
 
 st.divider()
 
