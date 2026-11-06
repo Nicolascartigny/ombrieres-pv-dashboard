@@ -290,23 +290,38 @@ st.divider()
 st.subheader("🎯 Performance spécifique par site")
 
 perf = perf_par_site(dfy)
-moyenne = perf["kwh"].sum() / (perf["kwc"] * perf["jours"]).sum()
+# Calcul de la moyenne de performance cumulée
+moyenne_perf = perf["kwh"].sum() / perf["kwc"].sum()
 
 fig_perf = px.bar(
     perf, 
     x="site", 
-    y="kwh_kwc_j", 
+    y="kwh_kwc", # On utilise le cumulé (ex: 860) plutôt que le journalier
     color="site", 
-    text="site",
+    text="kwh_kwc", # On cible la valeur numérique pour l'affichage
     category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"kwh_kwc_j": "kWh/kWc/jour", "site": ""}
+    labels={"kwh_kwc": "Performance (kWh/kWc)", "site": ""}
 )
-fig_perf.add_hline(y=moyenne, line_dash="dash", line_color="gray", annotation_text=f"Moyenne : {fmt(moyenne, 2)}")
-fig_perf.update_traces(texttemplate='%{text}', textposition='outside')
+
+fig_perf.add_hline(
+    y=moyenne_perf, 
+    line_dash="dash", 
+    line_color="gray", 
+    annotation_text=f"Moyenne : {fmt(moyenne_perf, 0)} kWh/kWc"
+)
+
+# Formatage : arrondi à l'entier (.0f), ajout de l'unité, placé à l'intérieur en blanc et en gras
+fig_perf.update_traces(
+    texttemplate='<b>%{text:.0f} kWh/kWc</b>', 
+    textposition='inside', 
+    insidetextanchor='middle',
+    textfont_color='white'
+)
+
 fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Production moyenne par jour et par kWc installé. (Les sites restent triés par ordre de production totale pour faciliter la lecture).")
+st.caption("Production totale cumulée par kWc installé (Rendement spécifique).")
 
 st.divider()
 
