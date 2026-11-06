@@ -286,37 +286,50 @@ st.plotly_chart(fig_mensuel, width="stretch")
 st.divider()
 
 
-# ---------------------------------------------------------------- 3. Graphique : Production moyenne journalière
-st.subheader("🎯 Production moyenne journalière")
+# ---------------------------------------------------------------- 3. Graphique : Productible annuel estimé
+st.subheader("🎯 Productible annuel (Tendance vs BP)")
 
 perf = perf_par_site(dfy)
-# Calcul du volume moyen produit par jour (en kWh)
-perf["kwh_jour"] = perf["kwh"] / perf["jours"]
 
-# Moyenne globale de ces productions journalières pour la ligne de repère
-moyenne_parc = perf["kwh_jour"].mean()
+# Calcul du productible annualisé : (Production / kWc) / nb_jours_actifs * 365
+perf["kwh_kwc_an"] = (perf["kwh"] / perf["kwc"]) / perf["jours"] * 365
+
+# Formatage exact du texte comme dans ton BP (ex: "1 088 kWh/kWc")
+perf["label_visuel"] = perf["kwh_kwc_an"].apply(lambda x: f"{x:,.0f} kWh/kWc".replace(",", " "))
+
+# Moyenne globale du parc pour la ligne grise
+moyenne_parc = (perf["kwh"].sum() / perf["kwc"].sum()) / perf["jours"].mean() * 365
 
 fig_perf = px.bar(
     perf, 
     x="site", 
-    y="kwh_jour", 
+    y="kwh_kwc_an", 
     color="site", 
-    text="kwh_jour",
+    text="label_visuel",
     category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"kwh_jour": "Production (kWh/jour)", "site": ""}
+    labels={"kwh_kwc_an": "Tendance (kWh/kWc/an)", "site": ""}
 )
 
+# Ligne de moyenne du parc actuel
 fig_perf.add_hline(
     y=moyenne_parc, 
     line_dash="dash", 
     line_color="gray", 
-    annotation_text=f"Moyenne : {fmt(moyenne_parc, 0)} kWh/j"
+    annotation_text=f"Moyenne extrapolée : {fmt(moyenne_parc, 0)} kWh/kWc/an"
 )
 
-# Formatage visuel : arrondi à l'entier, ajout de l'unité, texte blanc en gras au centre
+# Ligne d'objectif P50 du Business Plan
+fig_perf.add_hline(
+    y=1088, 
+    line_dash="dot", 
+    line_color="red", 
+    annotation_text="Objectif BP (P50) : 1 088 kWh/kWc",
+    annotation_position="bottom right"
+)
+
 fig_perf.update_traces(
-    texttemplate='<b>%{text:.0f} kWh/j</b>', 
+    texttemplate='<b>%{text}</b>', 
     textposition='inside', 
     insidetextanchor='middle',
     textfont_color='white'
@@ -324,7 +337,7 @@ fig_perf.update_traces(
 
 fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Volume d'énergie moyen produit par jour depuis la connexion au réseau (Total kWh divisé par le nombre de jours).")
+st.caption("Productible annualisé extrapolé (Production actuelle ramenée sur 365 jours). Note : Les centrales ayant été raccordées cet été, cette extrapolation est pour l'instant artificiellement haute et baissera naturellement après le passage de l'hiver pour s'aligner vers le P50.")
 
 st.divider()
 
