@@ -260,28 +260,36 @@ else:
 st.divider()
 
 
-# ---------------------------------------------------------------- 2. Graphique : Production mensuelle
-st.subheader("📊 Production mensuelle par site")
+# ---------------------------------------------------------------- 2. Graphique : Production totale
+st.subheader("⚡ Production totale depuis la mise en service")
 
-mensuel = (dfy.assign(mois=dfy["date"].dt.month)
-              .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-mensuel["kWh"] = mensuel["kwh_produits"]
-mensuel["Mois"] = mensuel["mois"].map(lambda m: MOIS[m - 1])
+prod = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
 
-fig_mensuel = px.bar(
-    mensuel, 
-    x="Mois", 
-    y="kWh", 
+# Conversion de kWh vers MWh
+prod["MWh"] = prod["kwh_produits"] / 1000
+
+# Formatage visuel (ex: "65,4 MWh")
+prod["label_visuel"] = prod["MWh"].apply(lambda x: f"{x:,.1f} MWh".replace(".", ","))
+
+fig_prod = px.bar(
+    prod, 
+    x="site", 
+    y="MWh", 
     color="site", 
-    barmode="group",
-    text="site", 
-    category_orders={"Mois": MOIS, "site": ordre_sites}, 
+    text="label_visuel",
+    category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"site": "Site", "kWh": "Production (kWh)"}
+    labels={"MWh": "Production cumulée (MWh)", "site": ""}
 )
-fig_mensuel.update_traces(texttemplate='%{text}', textposition='outside')
-fig_mensuel.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.25, title=None))
-st.plotly_chart(fig_mensuel, width="stretch")
+
+fig_prod.update_traces(
+    texttemplate='<b>%{text}</b>', 
+    textposition='inside', 
+    insidetextanchor='middle',
+    textfont_color='white'
+)
+fig_prod.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_prod, width="stretch")
 
 st.divider()
 
