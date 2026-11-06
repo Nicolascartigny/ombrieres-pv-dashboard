@@ -259,7 +259,6 @@ else:
 
 st.divider()
 
-
 # ---------------------------------------------------------------- 2. Graphique : Production totale
 st.subheader("⚡ Production totale depuis la mise en service")
 
@@ -292,7 +291,6 @@ fig_prod.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_prod, width="stretch")
 
 st.divider()
-
 
 # ---------------------------------------------------------------- 3. Graphique : Productible annuel extrapolé (Run Rate)
 st.subheader("🎯 Tendance annuelle de production (Extrapolée)")
@@ -341,66 +339,19 @@ st.caption("Productible annuel extrapolé (Moyenne journalière actuelle x 365 j
 
 st.divider()
 
-# ---------------------------------------------------------------- 4. Graphique : Rémunération mensuelle estimée
-st.subheader("💶 Rémunération mensuelle estimée")
+# ---------------------------------------------------------------- 4. Graphique : Rémunération du mois en cours
+st.subheader("💶 Rémunération du mois en cours")
 
-df_rem = (dfy.assign(mois=dfy["date"].dt.month)
-             .groupby(["mois", "site"], as_index=False)["kwh_produits"].sum())
-df_rem["MWh"] = df_rem["kwh_produits"] / 1000
-df_rem["Mois"] = df_rem["mois"].map(lambda m: MOIS[m - 1])
+# Filtrage dynamique pour ne garder que le mois actuel
+mois_actuel = pd.Timestamp.now().month
+annee_actuelle = pd.Timestamp.now().year
+df_mois = dfy[(dfy["date"].dt.month == mois_actuel) & (dfy["date"].dt.year == annee_actuelle)]
 
-TARIFS = {
-    "Les Minières (MSE)": 95.0,
-    "Mauges Communauté (MC)": 95.0,
-    "La Loge (BEM)": 95.0,
-    "Complexe Sportif (SEV)": 91.2
-}
-df_rem["Tarif (€/MWh)"] = df_rem["site"].map(lambda s: TARIFS.get(s, 95.0))
-df_rem["Rémunération (€)"] = df_rem["MWh"] * df_rem["Tarif (€/MWh)"]
+# Calcul des revenus pour ce mois précis
+df_rem_mois = df_mois.groupby("site", as_index=False)["kwh_produits"].sum()
+df_rem_mois["MWh"] = df_rem_mois["kwh_produits"] / 1000
 
-fig_rem = px.bar(
-    df_rem,
-    x="Mois",
-    y="Rémunération (€)",
-    color="site",
-    barmode="group",
-    text="site",
-    category_orders={"Mois": MOIS, "site": ordre_sites},
-    color_discrete_map=COULEURS,
-    labels={"site": "Site", "Rémunération (€)": "Revenus (€)"}
-)
-fig_rem.update_traces(texttemplate='%{text}', textposition='outside')
-fig_rem.update_layout(margin=dict(t=30, b=10), legend=dict(orientation="h", y=-0.2, title=None))
-st.plotly_chart(fig_rem, width="stretch")
-
-st.divider()
-
-
-# ---------------------------------------------------------------- 5. Graphique : Production totale YTD
-st.subheader("📈 Production totale par site depuis le début de l'année")
-
-fig_ytd = px.bar(
-    df_ytd_global, 
-    x="site", 
-    y="kwh_produits", 
-    color="site", 
-    text="site",
-    category_orders={"site": ordre_sites},
-    color_discrete_map=COULEURS,
-    labels={"kwh_produits": "Production totale (kWh)", "site": ""}
-)
-fig_ytd.update_traces(texttemplate='%{text}', textposition='outside')
-fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
-st.plotly_chart(fig_ytd, width="stretch")
-
-st.divider()
-# ---------------------------------------------------------------- 6. Graphique : Rémunération totale YTD
-st.subheader("💶 Rémunération totale depuis le début de l'année")
-
-df_rem_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
-df_rem_ytd["MWh"] = df_rem_ytd["kwh_produits"] / 1000
-
-# On reprend les tarifs (à mettre à jour si St Germain ou la Jumellière ont un tarif différent, ex: 135 €/MWh en ACC)
+# Application des tarifs 
 TARIFS = {
     "Les Minières (MSE)": 95.0,
     "Mauges Communauté (MC)": 95.0,
@@ -408,21 +359,56 @@ TARIFS = {
     "Complexe Sportif (SEV)": 91.2,
     "Déchèterie St Germain": 95.0
 }
-df_rem_ytd["Tarif (€/MWh)"] = df_rem_ytd["site"].map(lambda s: TARIFS.get(s, 95.0))
-df_rem_ytd["Revenus (€)"] = df_rem_ytd["MWh"] * df_rem_ytd["Tarif (€/MWh)"]
+df_rem_mois["Tarif (€/MWh)"] = df_rem_mois["site"].map(lambda s: TARIFS.get(s, 95.0))
+df_rem_mois["Revenus (€)"] = df_rem_mois["MWh"] * df_rem_mois["Tarif (€/MWh)"]
 
-# Formatage visuel (ex: "3 500 €")
-df_rem_ytd["label_visuel"] = df_rem_ytd["Revenus (€)"].apply(lambda x: f"{x:,.0f} €".replace(",", " "))
+# Formatage visuel (ex: "450 €")
+df_rem_mois["label_visuel"] = df_rem_mois["Revenus (€)"].apply(lambda x: f"{x:,.0f} €".replace(",", " "))
 
-fig_rem_ytd = px.bar(
-    df_rem_ytd, 
+fig_rem_mois = px.bar(
+    df_rem_mois, 
     x="site", 
     y="Revenus (€)", 
     color="site", 
     text="label_visuel",
     category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"Revenus (€)": "Revenus cumulés YTD (€)", "site": ""}
+    labels={"Revenus (€)": "Revenus du mois (€)", "site": ""}
+)
+
+fig_rem_mois.update_traces(
+    texttemplate='<b>%{text}</b>', 
+    textposition='inside', 
+    insidetextanchor='middle',
+    textfont_color='white'
+)
+fig_rem_mois.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_rem_mois, width="stretch")
+
+st.divider()
+
+# ---------------------------------------------------------------- 5. Graphique : Rémunération totale YTD
+st.subheader("💶 Rémunération totale depuis le début de l'année")
+
+df_rem_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+df_rem_ytd["MWh"] = df_rem_ytd["kwh_produits"] / 1000
+
+df_rem_ytd["Tarif (€/MWh)"] = df_rem_ytd["site"].map(lambda s: TARIFS.get(s, 95.0))
+df_rem_ytd["Revenus (€)"] = df_rem_ytd["MWh"] * df_rem_ytd["Tarif (€/MWh)"]
+df_rem_ytd["Revenus (k€)"] = df_rem_ytd["Revenus (€)"] / 1000
+
+# Formatage visuel (ex: "6,2 k€")
+df_rem_ytd["label_visuel"] = df_rem_ytd["Revenus (k€)"].apply(lambda x: f"{x:,.1f} k€".replace(".", ","))
+
+fig_rem_ytd = px.bar(
+    df_rem_ytd, 
+    x="site", 
+    y="Revenus (k€)", 
+    color="site", 
+    text="label_visuel",
+    category_orders={"site": ordre_sites},
+    color_discrete_map=COULEURS,
+    labels={"Revenus (k€)": "Revenus cumulés YTD (k€)", "site": ""}
 )
 
 fig_rem_ytd.update_traces(
@@ -433,10 +419,13 @@ fig_rem_ytd.update_traces(
 )
 fig_rem_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_rem_ytd, width="stretch")
-# Calcul et affichage du total global
+
+# Calcul et affichage du total global (en euros précis)
 total_revenus = df_rem_ytd["Revenus (€)"].sum()
 st.metric(label="💰 Total généré par l'ensemble du parc", value=f"{total_revenus:,.0f} €".replace(",", " "))
+
 st.divider()
+
 # ---------------------------------------------------------------- Tableau des données
 with st.expander("Données journalières récentes"):
     recent = dfy.sort_values(["date", "site"], ascending=[False, True])
