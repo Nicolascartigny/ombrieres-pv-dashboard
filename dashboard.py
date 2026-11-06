@@ -425,7 +425,9 @@ fig_rem_ytd.update_traces(
 )
 fig_rem_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_rem_ytd, width="stretch")
-
+# Calcul et affichage du total global
+total_revenus = df_rem_ytd["Revenus (€)"].sum()
+st.metric(label="💰 Total généré par l'ensemble du parc", value=f"{total_revenus:,.0f} €".replace(",", " "))
 st.divider()
 # ---------------------------------------------------------------- Tableau des données
 with st.expander("Données journalières récentes"):
