@@ -386,7 +386,47 @@ fig_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
 st.plotly_chart(fig_ytd, width="stretch")
 
 st.divider()
+# ---------------------------------------------------------------- 6. Graphique : Rémunération totale YTD
+st.subheader("💶 Rémunération totale depuis le début de l'année")
 
+df_rem_ytd = dfy.groupby("site", as_index=False)["kwh_produits"].sum()
+df_rem_ytd["MWh"] = df_rem_ytd["kwh_produits"] / 1000
+
+# On reprend les tarifs (à mettre à jour si St Germain ou la Jumellière ont un tarif différent, ex: 135 €/MWh en ACC)
+TARIFS = {
+    "Les Minières (MSE)": 95.0,
+    "Mauges Communauté (MC)": 95.0,
+    "La Loge (BEM)": 95.0,
+    "Complexe Sportif (SEV)": 91.2,
+    "Déchèterie St Germain": 95.0
+}
+df_rem_ytd["Tarif (€/MWh)"] = df_rem_ytd["site"].map(lambda s: TARIFS.get(s, 95.0))
+df_rem_ytd["Revenus (€)"] = df_rem_ytd["MWh"] * df_rem_ytd["Tarif (€/MWh)"]
+
+# Formatage visuel (ex: "3 500 €")
+df_rem_ytd["label_visuel"] = df_rem_ytd["Revenus (€)"].apply(lambda x: f"{x:,.0f} €".replace(",", " "))
+
+fig_rem_ytd = px.bar(
+    df_rem_ytd, 
+    x="site", 
+    y="Revenus (€)", 
+    color="site", 
+    text="label_visuel",
+    category_orders={"site": ordre_sites},
+    color_discrete_map=COULEURS,
+    labels={"Revenus (€)": "Revenus cumulés YTD (€)", "site": ""}
+)
+
+fig_rem_ytd.update_traces(
+    texttemplate='<b>%{text}</b>', 
+    textposition='inside', 
+    insidetextanchor='middle',
+    textfont_color='white'
+)
+fig_rem_ytd.update_layout(showlegend=False, margin=dict(t=30, b=10))
+st.plotly_chart(fig_rem_ytd, width="stretch")
+
+st.divider()
 # ---------------------------------------------------------------- Tableau des données
 with st.expander("Données journalières récentes"):
     recent = dfy.sort_values(["date", "site"], ascending=[False, True])
