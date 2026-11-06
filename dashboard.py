@@ -197,28 +197,86 @@ if (dfy["source"] == "mock").any():
 
 # ---------------------------------------------------------------- KPI & MAINTENANCE
 dernier_jour = dfy["date"].max()
+
+# --- 1. Calculs Jour ---
 jour_df = dfy[dfy["date"] == dernier_jour]
 prod_jour = jour_df["kwh_produits"].sum()
-kwc_jour = jour_df["kwc"].sum()
+
+# Hier
+jour_prec = dernier_jour - pd.Timedelta(days=1)
+prod_jour_prec = df[df["date"] == jour_prec]["kwh_produits"].sum()
+delta_jour = prod_jour - prod_jour_prec if prod_jour_prec > 0 else 0
+
+# --- 2. Calculs Mois (Month-to-Date vs même période mois précédent) ---
 mois_df = dfy[dfy["date"].dt.month == dernier_jour.month]
 prod_mois = mois_df["kwh_produits"].sum()
-kwc_mois = mois_df.drop_duplicates("site_key")["kwc"].sum()
-perf_mois = perf_par_site(mois_df)
-meilleur = perf_mois.loc[perf_mois["kwh_kwc_j"].idxmax()]
+
+annee_prec_mois = dernier_jour.year if dernier_jour.month > 1 else dernier_jour.year - 1
+mois_prec_idx = dernier_jour.month - 1 if dernier_jour.month > 1 else 12
+df_mois_prec = df[(df["date"].dt.year == annee_prec_mois) & 
+                  (df["date"].dt.month == mois_prec_idx) & 
+                  (df["date"].dt.day <= dernier_jour.day)]
+prod_mois_prec = df_mois_prec["kwh_produits"].sum()
+delta_mois = prod_mois - prod_mois_prec if prod_mois_prec > 0 else 0
+
+# --- 3. Calculs Année (Year-to-Date vs même période année précédente) ---
 total_annee = dfy["kwh_produits"].sum()
+
+df_annee_prec = df[(df["date"].dt.year == dernier_jour.year - 1) & 
+                   (df["date"].dt.dayofyear <= dernier_jour.dayofyear)]
+prod_annee_prec = df_annee_prec["kwh_produits"].sum()
+delta_annee = total_annee - prod_annee_prec if prod_annee_prec > 0 else 0
+
+# --- 4. Rémunération du mois ---
+TARIFS_KPI = {
+    "Les Minières (MSE)": 95.0,
+    "Mauges Communauté (MC)": 95.0,
+    "La Loge (BEM)": 95.0,
+    "Complexe Sportif (SEV)": 91.2,
+    "Déchèterie St Germain": 95.0
+}
+
+def calc_rev(d):
+    if d.empty: return 0
+    g = d.groupby("site")["kwh_produits"].sum().reset_index()
+    return ((g["kwh_produits"] / 1000) * g["site"].map(lambda s: TARIFS_KPI.get(s, 95.0))).sum()
+
+rev_mois = calc_rev(mois_df)
+rev_mois_prec = calc_rev(df_mois_prec)
+delta_rev = rev_mois - rev_mois_prec if rev_mois_prec > 0 else 0
+
+# --- 5. Taux de réalisation ---
 taux = total_annee / OBJECTIF_ANNUEL_KWH
 
-pr_moyen = (prod_mois / kwc_mois) if kwc_mois > 0 else 0
+# Fonction pour formater proprement les écarts avec le signe - préservé pour Streamlit
+def fmt_delta(val, unit, dec=0):
+    if val == 0: return None
+    s = f"{val:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", " ")
+    return f"{s} {unit}"
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric(f"Production du jour ({dernier_jour:%d/%m})", f"{fmt(prod_jour)} kWh",
-          f"{fmt(prod_jour / kwc_jour, 2)} kWh/kWc", delta_color="off")
-k2.metric(f"Production de {MOIS[dernier_jour.month - 1].lower()}", f"{fmt(prod_mois / 1000, 1)} MWh",
-          f"{fmt(prod_mois / kwc_mois, 1)} kWh/kWc", delta_color="off")
-k3.metric("Indice de Productivité (Mois)", f"{fmt(pr_moyen, 1)} kWh/kWc",
-          "Rendement spécifique", delta_color="off")
-k4.metric("Taux de réalisation de l'objectif", f"{fmt(taux * 100, 1)} %",
-          f"{fmt(total_annee / 1000, 1)} / {fmt(OBJECTIF_ANNUEL_KWH / 1000)} MWh", delta_color="off")
+# === Affichage des 5 colonnes ===
+k1, k2, k3, k4, k5 = st.columns(5)
+
+k1.metric(f"Prod. du jour ({dernier_jour:%d/%m})", 
+          f"{fmt(prod_jour)} kWh", 
+          fmt_delta(delta_jour, "kWh", 0))
+
+k2.metric(f"Prod. de {MOIS[dernier_jour.month - 1].lower()}", 
+          f"{fmt(prod_mois / 1000, 1)} MWh", 
+          fmt_delta(delta_mois / 1000, "MWh", 1))
+
+k3.metric("Prod. de l'année", 
+          f"{fmt(total_annee / 1000, 1)} MWh", 
+          fmt_delta(delta_annee / 1000, "MWh", 1))
+
+k4.metric(f"Rémunération ({MOIS[dernier_jour.month - 1].lower()})", 
+          f"{fmt(rev_mois)} €", 
+          fmt_delta(delta_rev, "€", 0))
+
+k5.metric("Taux de réalisation", 
+          f"{fmt(taux * 100, 1)} %", 
+          f"{fmt(total_annee / 1000, 1)} / {fmt(OBJECTIF_ANNUEL_KWH / 1000)} MWh", 
+          delta_color="off")
 
 alarmes = get_alarmes_actives()
 if alarmes:
@@ -227,7 +285,6 @@ else:
     st.success("✅ **État du parc :** Tous les onduleurs et centrales fonctionnent normalement (aucun défaut actif).")
 
 st.divider()
-
 # ---------------------------------------------------------------- 1. Graphique en Direct
 st.subheader("⚡ Puissance en direct (Aujourd'hui)")
 
