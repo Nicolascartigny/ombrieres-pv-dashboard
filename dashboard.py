@@ -286,40 +286,36 @@ st.plotly_chart(fig_mensuel, width="stretch")
 st.divider()
 
 
-# ---------------------------------------------------------------- 3. Graphique : Productible cumulé (YTD) vs Objectif P75
-st.subheader("🎯 Productible cumulé vs Objectif Annuel (P75)")
+# ---------------------------------------------------------------- 3. Graphique : Productible annuel extrapolé (Run Rate)
+st.subheader("🎯 Tendance annuelle de production (Extrapolée)")
 
 perf = perf_par_site(dfy)
 
-# Cumul strict depuis le début de l'année (brut, sans extrapolation)
-perf["kwh_kwc_cumul"] = perf["kwh"] / perf["kwc"]
+# Calcul du productible annualisé basé sur la moyenne journalière : (kWh / kWc / nb_jours) * 365
+perf["kwh_kwc_an"] = (perf["kwh"] / perf["kwc"]) / perf["jours"] * 365
 
-# Formatage visuel (ex: "450 kWh/kWc")
-perf["label_visuel"] = perf["kwh_kwc_cumul"].apply(lambda x: f"{x:,.0f} kWh/kWc".replace(",", " "))
+# Formatage visuel (ex: "1 088 kWh/kWc/an")
+perf["label_visuel"] = perf["kwh_kwc_an"].apply(lambda x: f"{x:,.0f} kWh/kWc/an".replace(",", " "))
 
 fig_perf = px.bar(
     perf, 
     x="site", 
-    y="kwh_kwc_cumul", 
+    y="kwh_kwc_an", 
     color="site", 
     text="label_visuel",
     category_orders={"site": ordre_sites},
     color_discrete_map=COULEURS,
-    labels={"kwh_kwc_cumul": "Productible cumulé (kWh/kWc)", "site": ""}
+    labels={"kwh_kwc_an": "Productible extrapolé (kWh/kWc/an)", "site": ""}
 )
 
-# Ligne d'objectif P75 du Business Plan (La ligne d'arrivée annuelle)
+# Ligne d'objectif P75 du Business Plan
 fig_perf.add_hline(
     y=1051, 
     line_dash="dot", 
     line_color="red", 
-    annotation_text="Objectif BP (P75) : 1 051 kWh/kWc",
+    annotation_text="Objectif BP (P75) : 1 051 kWh/kWc/an",
     annotation_position="bottom right"
 )
-
-# On force l'axe Y pour toujours voir la ligne rouge d'objectif, même en début d'année
-max_y = max(1200, perf["kwh_kwc_cumul"].max() * 1.1)
-fig_perf.update_layout(yaxis_range=[0, max_y])
 
 fig_perf.update_traces(
     texttemplate='<b>%{text}</b>', 
@@ -328,9 +324,12 @@ fig_perf.update_traces(
     textfont_color='white'
 )
 
-fig_perf.update_layout(showlegend=False, margin=dict(t=30, b=10))
+# Ajustement de l'axe Y pour toujours voir la ligne P75 même en cas de faible production hivernale
+max_y = max(1200, perf["kwh_kwc_an"].max() * 1.1)
+fig_perf.update_layout(yaxis_range=[0, max_y], showlegend=False, margin=dict(t=30, b=10))
+
 st.plotly_chart(fig_perf, width="stretch")
-st.caption("Productible cumulé depuis le 1er janvier. La barre représente l'avancement réel vers l'objectif annuel P75.")
+st.caption("Productible annuel extrapolé (Moyenne journalière actuelle x 365 jours) comparé à l'objectif P75.")
 
 st.divider()
 
