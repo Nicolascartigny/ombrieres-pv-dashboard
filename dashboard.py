@@ -176,11 +176,14 @@ OBJECTIFS_PAR_SITE = {
 }
 
 with st.sidebar:
+    # Affiche le logo en pleine largeur de la barre latérale
+    st.image("logo_mauges.png", use_container_width=True)
+    
     st.markdown("### 🎛️ Panneau de contrôle")
     
     annees = sorted(df["date"].dt.year.unique(), reverse=True)
     annee = st.selectbox("📅 Année d'analyse", annees)
-    
+        
     st.divider()
     
     st.markdown("### 📍 Périmètre géographique")
