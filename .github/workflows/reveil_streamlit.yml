@@ -1,0 +1,38 @@
+name: Réveil Dashboard Streamlit
+
+on:
+  schedule:
+    # Tous les jours à 6h30 UTC (7h30 heure d'hiver / 8h30 heure d'été)
+    - cron: '30 6 * * *'
+  workflow_dispatch: # Permet de lancer un test manuel
+
+jobs:
+  wake-up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Ouvrir le dashboard
+        run: |
+          python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page()
+              page.goto('https://dashboardpy-ag7bwgcxxjxvuchvgecvqz.streamlit.app/', wait_until='networkidle')
+              btn = page.get_by_role('button', name='Yes, get this app back up!')
+              if btn.is_visible():
+                  btn.click()
+                  page.wait_for_timeout(15000)
+              else:
+                  page.wait_for_timeout(10000)
+              browser.close()
+          "
