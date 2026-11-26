@@ -2,8 +2,8 @@ name: Réveil Dashboard Streamlit
 
 on:
   schedule:
-    # Tous les jours à 6h30 UTC (7h30 heure d'hiver / 8h30 heure d'été)
-    - cron: '30 6 * * *'
+    # Tous les jours à 6h17 UTC (7h17 heure d'hiver)
+    - cron: '17 6 * * *'
   workflow_dispatch: # Permet de lancer un test manuel
 
 jobs:
